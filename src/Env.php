@@ -9,7 +9,7 @@ class Env {
             if (strpos(trim($line), '#') === 0) continue;
             list($name, $value) = explode('=', $line, 2);
             $name = trim($name);
-            $value = trim($value);
+            $value = trim($value,  " \t\n\r\0\x0B\"'");
             if (!array_key_exists($name, $_ENV)) {
                 $_ENV[$name] = $value;
                 putenv("$name=$value");

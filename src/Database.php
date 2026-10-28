@@ -10,9 +10,9 @@ class Database {
     public static function getConnection(): PDO {
         if (self::$instance === null) {
             $host = Env::get('DB_HOST', 'localhost');
-            $db = Env::get('DB_NAME', 'finance');
+            $db   = Env::get('DB_NAME', 'finance');
             $user = Env::get('DB_USER', 'finance_user');
-            $pass = Env::get('DB_NAME', '');
+            $pass = Env::get('DB_PASS', '');
             $charset = 'utf8mb4';
 
             $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
