@@ -1,0 +1,16 @@
+# Секреты и окружение
+.env
+
+# Временные файлы и логи
+storage/logs/*
+storage/raw/*
+!storage/logs/.gitkeep
+!storage/raw/.gitkeep
+
+# Служебные файлы ОС
+.DS_Store
+Thumbs.db
+
+# Файлы IDE (если откроете локально)
+.vscode/
+.idea/
