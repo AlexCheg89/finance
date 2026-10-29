@@ -16,6 +16,9 @@ class AuthController {
         $username = trim($data['username'] ?? '');
         $password = trim($data['password'] ?? '');
 
+        // ВРЕМЕННАЯ ОТЛАДКА
+file_put_contents('/tmp/auth_debug.log', date('Y-m-d H:i:s') . " | INPUT: " . print_r($data, true) . PHP_EOL, FILE_APPEND);
+
         if (empty($username) || empty($password)) {
             Response::error('Введите логин и пароль', 400);
         }
