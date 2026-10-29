@@ -19,27 +19,51 @@ spl_autoload_register(function ($class) {
 use App\Env;
 use App\Database;
 use App\Response;
+use App\Controllers\AuthController;
 
 // Загружаем переменные окружения
 Env::load(__DIR__ . '/../../.env');
 
 // Простой роутинг для проверки
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$method = $_SERVER['REQUEST_METHOD'];
 
-if ($uri === '/api/ping') {
-    Response::json(['status' => 'ok', 'message' => 'API is working']);
-}
+// Простой роутинг
+switch (true) {
+    // ---- АУТЕНТИФИКАЦИЯ ----
+    case ($uri == '/api/auth/login' && $method === 'POST'):
+        $controller = new AuthController();
+        $controller->login();
+        break;
 
-if ($uri === '/api/db-test') {
-    try {
+    case ($uri == '/api/auth/logout' && $method === 'POST'):
+        $controller = new AuthController();
+        $controller->logout();
+        break;
+    
+    case ($uri == '/api/auth/me' && $method === 'GET'):
+        $controller = new AuthController();
+        $controller->me();
+        break;
+
+    // ---- ТЕСТОВЫЕ ЭНДПОИНТЫ ----
+    case ($uri === '/api/ping'):
+        Response::json(['status' => 'ok', 'message' => 'API is working']);
+        break;
+
+    case ($uri === '/api/db-test'):
+        try {
         $pdo = Database::getConnection();
         $stmt = $pdo->query("SELECT username FROM users LIMIT 1");
         $user = $stmt->fetch();
         Response::json(['status' => 'ok', 'db_user' => $user['username'] ?? 'no users']);
-    } catch (\Exception $e) {
-        Response::error('DB Error: ' . $e->getMessage(), 500);
-    }
-}
+        } catch (\Exception $e) {
+            Response::error('DB Error: ' . $e->getMessage(), 500);
+        }
+        break;
 
-// Если ничего не совпало
-Response::error('Not Found', 404);
+    // ---- 404 ----
+    default:
+        Response::error('Not Found', 404);
+        break;
+}
