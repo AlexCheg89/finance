@@ -49,3 +49,49 @@ input:focus, select:focus {
     transform: translateY(-3px);
     box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.25);
 }
+
+/* --- Модальное окно --- */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}
+
+.modal-window {
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    width: 90%;
+    max-width: 450px;
+    box-shadow: var(--glass-shadow);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+
+.modal-header h3 { margin: 0; font-size: 1.2em; }
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5em;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 0 5px;
+    box-shadow: none;
+}
+.modal-close:hover { color: var(--danger); background: none; transform: none; }
+
+.modal-body { padding: 20px; }

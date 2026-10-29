@@ -21,7 +21,11 @@ class TransactionController {
         $amount = $data['amount'] ?? 0;
         $counterparty = trim($data['counterparty'] ?? '');
         $date = $data['transaction_date'] ?? date('Y-m-d');
+        $time = $data['transaction_time'] ?? date('H:i:s');
         $items = $data['items'] ?? []; // Массив позиций
+
+        // Объединяем дату и время
+        $datetime = $date . ' ' . $time;
 
         if (!$accountId || $amount <= 0) {
             Response::error('Укажите счет и сумму больше нуля', 400);
@@ -43,7 +47,7 @@ class TransactionController {
                 'type' => $type,
                 'amount' => $amount,
                 'counterparty' => $counterparty,
-                'date' => $date
+                'date' => $datetime
             ]);
             
             $transactionId = $pdo->lastInsertId();
