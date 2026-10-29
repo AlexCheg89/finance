@@ -11,7 +11,7 @@ class Auth {
                 'domain' => '', // текущий домен
                 'secure' => false, // Поставьте true, если перейдете на HTTPS
                 'httponly' => true, // Запрет доступа из JS
-                'samesitr' => 'Lax' // Защита от CSRF 
+                'samesite' => 'Lax' // Защита от CSRF 
             ]);
             session_start();
         }
@@ -20,7 +20,7 @@ class Auth {
     public static function login(string $username, string $password): bool {
         $pdo = Database::getConnection();
 
-        $stmt = $pdo->prepare("SELECT id, passord_hash FROM users WHERE username = :username LIMIT 1");
+        $stmt = $pdo->prepare("SELECT id, password_hash FROM users WHERE username = :username LIMIT 1");
         $stmt->execute(['username' => $username]);
         $user = $stmt->fetch();
 
