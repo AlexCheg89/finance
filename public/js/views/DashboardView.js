@@ -1,8 +1,8 @@
 import { api } from '../api.js';
 import { store } from '../store.js';
-import { formatMoney, formatDate } from '../utils/format.js';
-import { showStatus } from '../utils/status.js';
-import { Modal } from '../components/Modal.js'; // Подключаем модалку
+import { formatMoney, formatDateTime } from '../utils/format.js';
+import { showStatus, showErrorModal } from '../utils/status.js';
+import { Modal } from '../components/Modal.js';
 
 export class DashboardView {
     async mount(container) {
@@ -58,7 +58,6 @@ export class DashboardView {
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/transactions' }));
         });
 
-        // Обработчик кнопки добавления операции
         document.getElementById('btn-add-tx').addEventListener('click', () => {
             this.openAddTransactionModal();
         });
@@ -74,7 +73,7 @@ export class DashboardView {
             document.getElementById('total-balance').textContent = formatMoney(total, 'RUB');
 
             const txRes = await api.get('/transactions');
-            const recent = txRes.transactions.slice(0, 5); // Берем 5 последних
+            const recent = txRes.transactions.slice(0, 5);
             
             const txContainer = document.getElementById('recent-transactions');
             if (recent.length === 0) {
@@ -83,6 +82,14 @@ export class DashboardView {
             }
 
             txContainer.innerHTML = recent.map(tx => this.renderTransaction(tx)).join('');
+
+            // Добавляем обработчики кликов
+            document.querySelectorAll('.tx-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const id = card.dataset.id;
+                    window.dispatchEvent(new CustomEvent('navigate', { detail: `/transaction/${id}` }));
+                });
+            });
 
         } catch (e) {
             document.getElementById('total-balance').textContent = 'Ошибка';
@@ -96,19 +103,15 @@ export class DashboardView {
             return;
         }
 
-        // Получаем ID последнего использованного счета из localStorage
         const lastAccountId = localStorage.getItem('lastAccountId');
-
-        // Формируем опции для select, помечая нужный счет как selected
         const accountOptions = store.state.accounts.map(acc => {
             const isSelected = lastAccountId && acc.id.toString() === lastAccountId;
             return `<option value="${acc.id}" ${isSelected ? 'selected' : ''}>${acc.name}</option>`;
         }).join('');
 
-        // Текущая дата и время
         const now = new Date();
         const today = now.toISOString().split('T')[0];
-        const currentTime = now.toTimeString().slice(0, 5); // Формат HH:MM
+        const currentTime = now.toTimeString().slice(0, 5);
 
         const formHTML = `
             <form id="quick-tx-form">
@@ -136,7 +139,6 @@ export class DashboardView {
 
         document.getElementById('quick-tx-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
             const selectedAccount = document.getElementById('tx-account').value;
 
             const payload = {
@@ -145,21 +147,18 @@ export class DashboardView {
                 account_id: parseInt(selectedAccount),
                 counterparty: document.getElementById('tx-counterparty').value,
                 transaction_date: document.getElementById('tx-date').value,
-                transaction_time: document.getElementById('tx-time').value, // Передаем время
+                transaction_time: document.getElementById('tx-time').value,
                 items: [] 
             };
 
             try {
                 await api.post('/transactions', payload);
-                
-                // ЗАПОМИНАЕМ ПОСЛЕДНИЙ СЧЕТ
                 localStorage.setItem('lastAccountId', selectedAccount);
-
                 modal.close();
                 showStatus('Операция добавлена', 'success');
                 await this.loadData(); 
             } catch (err) {
-                showStatus(err.message, 'error');
+                showErrorModal(err.message);
             }
         });
     }
@@ -169,13 +168,19 @@ export class DashboardView {
         const color = isExpense ? 'var(--danger)' : 'var(--success)';
         const sign = isExpense ? '-' : '+';
         
+        // Форматируем дату и время
+        const formattedDate = formatDateTime(tx.transaction_date);
+        
+        // Проверяем, сверена ли
+        const reconciledIcon = parseInt(tx.is_reconciled) === 1 ? ' &#10004;' : '';
+
         return `
-            <div class="account-card" style="margin-bottom: 10px; cursor: default; padding: 15px;">
+            <div class="account-card tx-card" data-id="${tx.id}" style="margin-bottom: 10px; cursor: pointer; padding: 15px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <div>
-                        <strong>${tx.counterparty || 'Без контрагента'}</strong>
+                        <strong>${tx.counterparty || 'Без контрагента'}${reconciledIcon}</strong>
                         <div style="font-size: 0.85em; color: var(--text-muted); margin-top: 4px;">
-                            ${formatDate(tx.transaction_date)} &bull; ${tx.account_name}
+                            ${formattedDate} &bull; ${tx.account_name}
                         </div>
                     </div>
                     <div style="font-weight: bold; color: ${color}; font-size: 1.1em;">
