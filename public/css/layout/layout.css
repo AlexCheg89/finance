@@ -1,19 +1,52 @@
 #app {
     max-width: 900px;
     margin: 0 auto;
-    padding: 20px;
+    padding: 40px 20px; /* Больше отступа сверху */
 }
 
-.dashboard {
-    background: var(--card-bg);
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+.dashboard, .auth-container, .account-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px); /* Само размытие */
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    border-radius: 16px; /* Более круглые углы */
+}
+
+.dashboard, .auth-container {
+    padding: 30px;
+    margin-bottom: 20px;
 }
 
 header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 30px;
+    border-bottom: 1px solid rgba(0,0,0,0.05);
+    padding-bottom: 15px;
+}
+
+/* Адаптивность для мобильных */
+@media (max-width: 600px) {
+    #app {
+        padding: 15px;
+    }
+    .dashboard {
+        padding: 20px;
+    }
+    header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    header button {
+        width: 100%;
+    }
+    .accounts-grid {
+        grid-template-columns: 1fr; /* Карточки в один столбец */
+    }
+    div[style*="display: flex; gap: 10px;"] {
+        flex-direction: column; /* Кнопки навигации в столбик */
+    }
 }

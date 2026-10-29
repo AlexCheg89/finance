@@ -20,6 +20,7 @@ use App\Response;
 use App\Router;
 use App\Controllers\AuthController;
 use App\Controllers\AccountController;
+use App\Controllers\TransactionController;
 
 Env::load(__DIR__ . '/../../.env');
 
@@ -38,6 +39,11 @@ $router->add('GET',  '/api/auth/me', function() { (new AuthController())->me(); 
 // Счета
 $router->add('GET',  '/api/accounts', function() { (new AccountController())->index(); });
 $router->add('POST', '/api/accounts', function() { (new AccountController())->store(); });
+
+// Транкзакции
+$router->add('POST', '/api/transactions', function() { (new TransactionController())->store(); });
+
+$router->add('GET', '/api/transactions', function() { (new TransactionController())->index(); });
 
 // Запуск
 $router->dispatch($method, $uri);

@@ -1,21 +1,26 @@
 :root {
-    --bg-color: #f0f2f5;
-    --card-bg: #ffffff;
-    --text-main: #333;
-    --text-muted: #888;
+    /* Градиентный фон для эффекта стекла */
+    --bg-gradient: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
+    --glass-bg: rgba(255, 255, 255, 0.4);
+    --glass-border: rgba(255, 255, 255, 0.6);
+    --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+    
+    --text-main: #1a1a1a;
+    --text-muted: #555;
     --primary: #007bff;
     --success: #2e7d32;
     --danger: #d32f2f;
-    --border: #ddd;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
     font-family: system-ui, -apple-system, sans-serif;
-    background: var(--bg-color);
+    background: var(--bg-gradient);
+    background-attachment: fixed; /* Чтобы фон не скроллился */
     color: var(--text-main);
     line-height: 1.5;
+    min-height: 100vh;
 }
 
 input, select, button {
