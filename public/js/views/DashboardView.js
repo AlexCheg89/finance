@@ -1,5 +1,7 @@
 import { api } from '../api.js';
 import { store } from '../store.js';
+import { formatMoney } from '../utils/format.js';
+import { showStatus } from '../utils/status.js';
 
 export class DashboardView {
     async mount(container) {
@@ -15,32 +17,44 @@ export class DashboardView {
         }
 
         container.innerHTML = `
-            <div class="dashboard">
-                <h1>Привет, ${store.state.user.username}!</h1>
-                <button id="logout-btn">Выйти</button>
-                <h2>Мои счета</h2>
-                <ul id="accounts-list"><li>Загрузка...</li></ul>
+            <header>
+                    <h1>Привет, ${store.state.user.username}!</h1>
+                    <button id="logout-btn">
+                        &#128682;
+                        Выйти
+                    </button>
+                </header>
+                <div style="margin-bottom: 20px;">
+                    <button id="go-accounts">&#128179; Мои счета</button>
+                </div>
+
+                <h2>Общий баланс</h2>
+                <div id="total-balance" style="font-size: 2em; font-weight: bold; color: var(--success);">
+                    Загрузка...
+                </div>
             </div>
         `;
 
         document.getElementById('logout-btn').addEventListener('click', async () => {
             await api.post('/auth/logout');
             store.set('user', null);
+            showStatus('Вы вышли из системы', 'info');
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/login' }));
         });
 
-        try {
+        document.getElementById('go-accounts').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('navigate', { detail: '/accounts' }));
+        });
+
+         try {
             const res = await api.get('/accounts');
-            const list = document.getElementById('accounts-list');
-            if (res.accounts.length === 0) {
-                list.innerHTML = '<li>Счетов пока нет</li>';
-            } else {
-                list.innerHTML = res.accounts.map(acc => `
-                    <li><strong>${acc.name}</strong> (${acc.type}): ${acc.balance} ${acc.currency}</li>
-                `).join('');
-            }
+            store.set('accounts', res.accounts);
+            
+            const total = res.accounts.reduce((sum, acc) => sum + parseFloat(acc.balance), 0);
+            document.getElementById('total-balance').textContent = formatMoney(total, 'RUB');
         } catch (e) {
-            console.error(e);
+            document.getElementById('total-balance').textContent = 'Ошибка';
+            showStatus('Не удалось загрузить счета', 'error');
         }
     }
 }

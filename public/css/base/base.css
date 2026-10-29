@@ -1,0 +1,24 @@
+:root {
+    --bg-color: #f0f2f5;
+    --card-bg: #ffffff;
+    --text-main: #333;
+    --text-muted: #888;
+    --primary: #007bff;
+    --success: #2e7d32;
+    --danger: #d32f2f;
+    --border: #ddd;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg-color);
+    color: var(--text-main);
+    line-height: 1.5;
+}
+
+input, select, button {
+    font-family: inherit;
+    font-size: 1rem;
+}
