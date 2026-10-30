@@ -59,8 +59,9 @@ export class TransactionDetailView {
                     
                     <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 1.2em;">
                         <span>Осталось разобрать:</span>
-                        <strong style="color: ${isFullyParsed ? 'var(--success)' : 'var(--primary)'};">
-                            ${isFullyParsed ? 'Все разобрано!' : formatMoney(remaining, 'RUB')}
+                        <strong style="color: ${isFullyParsed ? 'var(--success)' : 'var(--primary)'}; display: flex; align-items: center; gap: 5px;">
+                            ${formatMoney(remaining, 'RUB')}
+                            ${isFullyParsed ? '<span style="font-size: 1.2em;" title="Разобрано">&#10004;</span>' : ''}
                         </strong>
                     </div>
                 </div>
@@ -69,12 +70,15 @@ export class TransactionDetailView {
                 <div id="items-list" style="margin-bottom: 20px;">
                     ${tx.items.length === 0 ? '<p style="color: var(--text-muted);">Позиций пока нет</p>' : ''}
                     ${tx.items.map(item => `
-                        <div class="account-card" style="margin-bottom: 10px; padding: 10px;">
-                            <div style="display: flex; justify-content: space-between;">
+                        <div class="account-card" style="margin-bottom: 10px; padding: 10px; display: flex; justify-content: space-between; align-items: center;">
+                            <div>
                                 <span>${item.name} (${item.quantity} x ${formatMoney(item.unit_price, 'RUB')})</span>
-                                <strong>${formatMoney(item.total_price, 'RUB')}</strong>
+                                ${item.category_name ? `<div style="font-size: 0.85em; color: var(--text-muted);">${item.category_name}</div>` : ''}
                             </div>
-                            ${item.category_name ? `<div style="font-size: 0.85em; color: var(--text-muted);">${item.category_name}</div>` : ''}
+                            <div style="display: flex; align-items: center; gap: 15px;">
+                                <strong>${formatMoney(item.total_price, 'RUB')}</strong>
+                                ${!isReconciled ? `<button class="delete-item-btn" data-id="${item.id}" style="background: none; color: var(--danger); padding: 5px; font-size: 1.2em; box-shadow: none;" title="Удалить">&#10006;</button>` : ''}
+                            </div>
                         </div>
                     `).join('')}
                 </div>
@@ -111,6 +115,21 @@ export class TransactionDetailView {
 
         document.getElementById('back-btn').addEventListener('click', () => {
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/dashboard' }));
+        });
+
+        document.querySelectorAll('.delete-item-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation(); // Чтобы не сработал клик по карточке
+                const itemId = btn.dataset.id;
+                try {
+                    await api.delete(`/transactions/items/${itemId}`);
+                    const res = await api.get(`/transactions/${tx.id}`);
+                    this.tx = res.transaction;
+                    this.render(container);
+                } catch (err) {
+                    showErrorModal(err.message);
+                }
+            });
         });
 
         // Кнопка "Сверить"

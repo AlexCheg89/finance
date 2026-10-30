@@ -210,4 +210,36 @@ class TransactionController {
         
         Response::json(['status' => 'ok']);
     }
+
+    // DELETE /api/transactions/items/{itemId}
+    public function deleteItem(array $params): void {
+        $user = Auth::user();
+        if (!$user) Response::error('Unauthorized', 401);
+
+        $itemId = (int)$params['itemId'];
+        $pdo = Database::getConnection();
+
+        // Проверяем, что позиция принадлежит транзакции пользователя и транзакция не сверена
+        $stmt = $pdo->prepare("
+            SELECT ti.id, t.is_reconciled 
+            FROM transaction_items ti
+            JOIN transactions t ON ti.transaction_id = t.id
+            WHERE ti.id = :item_id AND t.user_id = :uid
+        ");
+        $stmt->execute(['item_id' => $itemId, 'uid' => $user['id']]);
+        $item = $stmt->fetch();
+
+        if (!$item) Response::error('Позиция не найдена', 404);
+        
+        // Если сверено, проверяем права (пока разрешаем только админу, если добавим роли)
+        if ($item['is_reconciled']) {
+             // Здесь позже будет проверка: if ($user['role'] !== 'admin') ...
+             Response::error('Транзакция сверена, редактирование запрещено', 403);
+        }
+
+        $stmtDel = $pdo->prepare("DELETE FROM transaction_items WHERE id = :id");
+        $stmtDel->execute(['id' => $itemId]);
+
+        Response::json(['status' => 'ok']);
+    }
 }

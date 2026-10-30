@@ -48,5 +48,6 @@ $router->add('POST', '/api/transactions', function() { (new TransactionControlle
 $router->add('GET',  '/api/transactions/{id}', function($p) { (new TransactionController())->show($p); });
 $router->add('POST', '/api/transactions/{id}/items', function($p) { (new TransactionController())->addItem($p); });
 $router->add('POST', '/api/transactions/{id}/reconcile', function($p) { (new TransactionController())->reconcile($p); });
+$router->add('DELETE', '/api/transactions/items/{itemId}', function($p) { (new TransactionController())->deleteItem($p); });
 
 $router->dispatch($method, $uri);

@@ -1,5 +1,6 @@
 import { api } from '../api.js';
 import { store } from '../store.js';
+import { createTransactionCard } from '../components/TransactionCard.js';
 import { formatMoney, formatDateTime } from '../utils/format.js';
 import { showStatus, showErrorModal } from '../utils/status.js';
 import { Modal } from '../components/Modal.js';
@@ -76,19 +77,14 @@ export class DashboardView {
             const recent = txRes.transactions.slice(0, 5);
             
             const txContainer = document.getElementById('recent-transactions');
+            txContainer.innerHTML = ''; // Очищаем
             if (recent.length === 0) {
                 txContainer.innerHTML = '<p>Операций пока нет.</p>';
                 return;
             }
 
-            txContainer.innerHTML = recent.map(tx => this.renderTransaction(tx)).join('');
-
-            // Добавляем обработчики кликов
-            document.querySelectorAll('.tx-card').forEach(card => {
-                card.addEventListener('click', () => {
-                    const id = card.dataset.id;
-                    window.dispatchEvent(new CustomEvent('navigate', { detail: `/transaction/${id}` }));
-                });
+            recent.forEach(tx => {
+                txContainer.appendChild(createTransactionCard(tx));
             });
 
         } catch (e) {

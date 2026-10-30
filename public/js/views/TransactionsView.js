@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { createTransactionCard } from '../components/TransactionCard.js';
 import { formatMoney, formatDate } from '../utils/format.js';
 import { showStatus } from '../utils/status.js';
 
@@ -29,31 +30,42 @@ export class TransactionsView {
                 return;
             }
 
-            // Рендерим список
-            list.innerHTML = res.transactions.map(tx => {
-                const isExpense = tx.type === 'expense';
-                const color = isExpense ? 'var(--danger)' : 'var(--success)';
-                const sign = isExpense ? '-' : '+';
+            // Группируем по дате
+            const grouped = res.transactions.reduce((acc, tx) => {
+                const date = tx.transaction_date.split(' ')[0]; // Берем только YYYY-MM-DD
+                if (!acc[date]) acc[date] = [];
+                acc[date].push(tx);
+                return acc;
+            }, {});
+
+            list.innerHTML = ''; // Очищаем
+
+            // Рендерим группы
+            for (const [date, txs] of Object.entries(grouped)) {
+                // Считаем сумму расходов за день
+                const dayExpenses = txs
+                    .filter(t => t.type === 'expense')
+                    .reduce((sum, t) => sum + parseFloat(t.amount), 0);
                 
-                return `
-                    <div class="account-card" style="margin-bottom: 10px; cursor: default;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <strong>${tx.counterparty || 'Без контрагента'}</strong>
-                                <div style="font-size: 0.85em; color: var(--text-muted);">
-                                    ${formatDate(tx.transaction_date)} | ${tx.account_name}
-                                </div>
-                            </div>
-                            <div style="font-weight: bold; color: ${color}; font-size: 1.2em;">
-                                ${sign}${formatMoney(tx.amount, 'RUB')}
-                            </div>
-                        </div>
-                    </div>
+                // Форматируем дату для заголовка (ДД.ММ.ГГГГ)
+                const [y, m, d] = date.split('-');
+                const formattedDate = `${d}.${m}.${y}`;
+
+                const groupHeader = document.createElement('div');
+                groupHeader.style.cssText = 'margin: 20px 0 10px 0; font-weight: bold; color: var(--text-main); display: flex; justify-content: space-between;';
+                groupHeader.innerHTML = `
+                    <span>${formattedDate}</span>
+                    <span style="color: var(--danger);">Потрачено: ${formatMoney(dayExpenses, 'RUB')}</span>
                 `;
-            }).join('');
+                list.appendChild(groupHeader);
+
+                txs.forEach(tx => {
+                    list.appendChild(createTransactionCard(tx));
+                });
+            }
 
         } catch (err) {
-            showStatus(err.message, 'error');
+            showErrorModal(err.message);
             document.getElementById('tx-list').innerHTML = `<p style="color:var(--danger)">Ошибка: ${err.message}</p>`;
         }
     }
