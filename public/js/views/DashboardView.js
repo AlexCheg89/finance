@@ -1,9 +1,9 @@
 import { api } from '../api.js';
 import { store } from '../store.js';
-import { createTransactionCard } from '../components/TransactionCard.js';
 import { formatMoney, formatDateTime } from '../utils/format.js';
 import { showStatus, showErrorModal } from '../utils/status.js';
 import { Modal } from '../components/Modal.js';
+import { createTransactionCard } from '../components/TransactionCard.js';
 
 export class DashboardView {
     async mount(container) {
@@ -21,9 +21,7 @@ export class DashboardView {
             <div class="dashboard">
                 <header>
                     <h1>Привет, ${store.state.user.username}!</h1>
-                    <button id="logout-btn" style="width:auto; padding: 5px 15px;">
-                        &#128682; Выйти
-                    </button>
+                    <button id="logout-btn" style="width:auto; padding: 5px 15px;">&#128682; Выйти</button>
                 </header>
                 
                 <div style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
@@ -33,14 +31,10 @@ export class DashboardView {
                 </div>
 
                 <h2>Общий баланс</h2>
-                <div id="total-balance" style="font-size: 2em; font-weight: bold; color: var(--success); margin-bottom: 30px;">
-                    Загрузка...
-                </div>
+                <div id="total-balance" style="font-size: 2em; font-weight: bold; color: var(--success); margin-bottom: 30px;">Загрузка...</div>
 
                 <h2>Последние операции</h2>
-                <div id="recent-transactions" style="margin-top: 15px;">
-                    <p>Загрузка...</p>
-                </div>
+                <div id="recent-transactions" style="margin-top: 15px;"><p>Загрузка...</p></div>
             </div>
         `;
 
@@ -51,17 +45,9 @@ export class DashboardView {
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/login' }));
         });
 
-        document.getElementById('go-accounts').addEventListener('click', () => {
-            window.dispatchEvent(new CustomEvent('navigate', { detail: '/accounts' }));
-        });
-
-        document.getElementById('go-transactions').addEventListener('click', () => {
-            window.dispatchEvent(new CustomEvent('navigate', { detail: '/transactions' }));
-        });
-
-        document.getElementById('btn-add-tx').addEventListener('click', () => {
-            this.openAddTransactionModal();
-        });
+        document.getElementById('go-accounts').addEventListener('click', () => window.dispatchEvent(new CustomEvent('navigate', { detail: '/accounts' })));
+        document.getElementById('go-transactions').addEventListener('click', () => window.dispatchEvent(new CustomEvent('navigate', { detail: '/transactions' })));
+        document.getElementById('btn-add-tx').addEventListener('click', () => this.openAddTransactionModal());
 
         await this.loadData();
     }
@@ -75,39 +61,38 @@ export class DashboardView {
 
             const txRes = await api.get('/transactions');
             const recent = txRes.transactions.slice(0, 5);
-            
             const txContainer = document.getElementById('recent-transactions');
-            txContainer.innerHTML = ''; // Очищаем
+            txContainer.innerHTML = '';
+            
             if (recent.length === 0) {
                 txContainer.innerHTML = '<p>Операций пока нет.</p>';
                 return;
             }
-
-            recent.forEach(tx => {
-                txContainer.appendChild(createTransactionCard(tx));
-            });
-
+            recent.forEach(tx => txContainer.appendChild(createTransactionCard(tx)));
         } catch (e) {
             document.getElementById('total-balance').textContent = 'Ошибка';
-            showStatus('Не удалось загрузить данные', 'error');
+            showErrorModal('Не удалось загрузить данные');
         }
     }
 
-    openAddTransactionModal() {
+    async openAddTransactionModal() {
         if (!store.state.accounts || store.state.accounts.length === 0) {
-            showStatus('Сначала создайте хотя бы один счет!', 'error');
+            showErrorModal('Сначала создайте хотя бы один счет!');
             return;
         }
 
         const lastAccountId = localStorage.getItem('lastAccountId');
-        const accountOptions = store.state.accounts.map(acc => {
-            const isSelected = lastAccountId && acc.id.toString() === lastAccountId;
-            return `<option value="${acc.id}" ${isSelected ? 'selected' : ''}>${acc.name}</option>`;
-        }).join('');
+        const accountOptions = store.state.accounts.map(acc => 
+            `<option value="${acc.id}" ${lastAccountId === acc.id.toString() ? 'selected' : ''}>${acc.name}</option>`
+        ).join('');
 
         const now = new Date();
         const today = now.toISOString().split('T')[0];
         const currentTime = now.toTimeString().slice(0, 5);
+
+        // Подгружаем категории
+        const catRes = await api.get('/categories');
+        const catOptions = catRes.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
 
         const formHTML = `
             <form id="quick-tx-form">
@@ -116,35 +101,61 @@ export class DashboardView {
                     <option value="income">Доход</option>
                 </select>
                 <input type="number" id="tx-amount" placeholder="Сумма (например, 500)" step="0.01" required>
-                <select id="tx-account">
-                    ${accountOptions}
-                </select>
+                <select id="tx-account">${accountOptions}</select>
                 <input type="text" id="tx-counterparty" placeholder="Контрагент (например, Пятерочка)">
                 
                 <div style="display: flex; gap: 10px;">
                     <input type="date" id="tx-date" value="${today}" required style="flex: 2;">
                     <input type="time" id="tx-time" value="${currentTime}" required style="flex: 1;">
                 </div>
+
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.1);">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                        <input type="checkbox" id="tx-has-details" style="width: auto; margin: 0;">
+                        <label for="tx-has-details" style="font-size: 0.9em; cursor: pointer;">Будет детализация (позиции)</label>
+                    </div>
+                    <div id="single-category-container">
+                        <label style="font-size: 0.8em; color: var(--text-muted);">Категория</label>
+                        <select id="tx-category"><option value="">Без категории</option>${catOptions}</select>
+                    </div>
+                </div>
                 
-                <button type="submit" style="margin-top: 10px; width: 100%;">Сохранить</button>
+                <button type="submit" style="margin-top: 15px; width: 100%;">Сохранить</button>
             </form>
         `;
 
         const modal = new Modal('Новая операция', formHTML);
         modal.open();
 
+        // Переключение видимости категории
+        document.getElementById('tx-has-details').addEventListener('change', (e) => {
+            document.getElementById('single-category-container').style.display = e.target.checked ? 'none' : 'block';
+        });
+
         document.getElementById('quick-tx-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const selectedAccount = document.getElementById('tx-account').value;
+            const hasDetails = document.getElementById('tx-has-details').checked;
+            const catId = document.getElementById('tx-category').value;
+            const amountVal = parseFloat(document.getElementById('tx-amount').value);
+
+            // Если детализации нет, но категория выбрана — создаем одну позицию
+            const items = (!hasDetails && catId) ? [{
+                name: 'Основная сумма',
+                category_id: parseInt(catId),
+                quantity: 1,
+                unit_price: amountVal,
+                total_price: amountVal
+            }] : [];
 
             const payload = {
                 type: document.getElementById('tx-type').value,
-                amount: parseFloat(document.getElementById('tx-amount').value),
+                amount: amountVal,
                 account_id: parseInt(selectedAccount),
                 counterparty: document.getElementById('tx-counterparty').value,
                 transaction_date: document.getElementById('tx-date').value,
                 transaction_time: document.getElementById('tx-time').value,
-                items: [] 
+                items: items
             };
 
             try {
@@ -157,33 +168,5 @@ export class DashboardView {
                 showErrorModal(err.message);
             }
         });
-    }
-
-    renderTransaction(tx) {
-        const isExpense = tx.type === 'expense';
-        const color = isExpense ? 'var(--danger)' : 'var(--success)';
-        const sign = isExpense ? '-' : '+';
-        
-        // Форматируем дату и время
-        const formattedDate = formatDateTime(tx.transaction_date);
-        
-        // Проверяем, сверена ли
-        const reconciledIcon = parseInt(tx.is_reconciled) === 1 ? ' &#10004;' : '';
-
-        return `
-            <div class="account-card tx-card" data-id="${tx.id}" style="margin-bottom: 10px; cursor: pointer; padding: 15px;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>
-                        <strong>${tx.counterparty || 'Без контрагента'}${reconciledIcon}</strong>
-                        <div style="font-size: 0.85em; color: var(--text-muted); margin-top: 4px;">
-                            ${formattedDate} &bull; ${tx.account_name}
-                        </div>
-                    </div>
-                    <div style="font-weight: bold; color: ${color}; font-size: 1.1em;">
-                        ${sign}${formatMoney(tx.amount, 'RUB')}
-                    </div>
-                </div>
-            </div>
-        `;
     }
 }

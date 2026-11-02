@@ -8,7 +8,12 @@ use PDO;
 
 class TransactionController {
     
-    // GET /api/transactions
+    // Проверка прав: админ может всё, обычный юзер - только не сверенное
+    private function canEdit(array $user, array $tx): bool {
+        if ($user['role'] === 'admin') return true;
+        return (int)$tx['is_reconciled'] === 0;
+    }
+
     public function index(): void {
         $user = Auth::user();
         if (!$user) Response::error('Unauthorized', 401);
@@ -25,10 +30,29 @@ class TransactionController {
         $stmt->execute(['uid' => $user['id']]);
         $transactions = $stmt->fetchAll();
 
+        if (!empty($transactions)) {
+            $txIds = array_column($transactions, 'id');
+            $inQuery = implode(',', array_fill(0, count($txIds), '?'));
+            $stmtItems = $pdo->prepare("
+                SELECT ti.*, c.name as category_name 
+                FROM transaction_items ti
+                LEFT JOIN categories c ON ti.category_id = c.id
+                WHERE ti.transaction_id IN ($inQuery)
+            ");
+            $stmtItems->execute($txIds);
+            $items = $stmtItems->fetchAll();
+
+            $itemsByTx = [];
+            foreach ($items as $item) {
+                $itemsByTx[$item['transaction_id']][] = $item;
+            }
+            foreach ($transactions as &$tx) {
+                $tx['items'] = $itemsByTx[$tx['id']] ?? [];
+            }
+        }
         Response::json(['status' => 'ok', 'transactions' => $transactions]);
     }
 
-    // GET /api/transactions/{id}
     public function show(array $params): void {
         $user = Auth::user();
         if (!$user) Response::error('Unauthorized', 401);
@@ -36,32 +60,19 @@ class TransactionController {
         $id = (int)$params['id'];
         $pdo = Database::getConnection();
 
-        $stmt = $pdo->prepare("
-            SELECT t.*, a.name as account_name 
-            FROM transactions t
-            JOIN accounts a ON t.account_id = a.id
-            WHERE t.id = :id AND t.user_id = :uid
-        ");
+        $stmt = $pdo->prepare("SELECT t.*, a.name as account_name FROM transactions t JOIN accounts a ON t.account_id = a.id WHERE t.id = :id AND t.user_id = :uid");
         $stmt->execute(['id' => $id, 'uid' => $user['id']]);
         $transaction = $stmt->fetch();
 
-        if (!$transaction) {
-            Response::error('Транзакция не найдена', 404);
-        }
+        if (!$transaction) Response::error('Транзакция не найдена', 404);
 
-        $stmtItems = $pdo->prepare("
-            SELECT ti.*, c.name as category_name 
-            FROM transaction_items ti
-            LEFT JOIN categories c ON ti.category_id = c.id
-            WHERE ti.transaction_id = :tid
-        ");
+        $stmtItems = $pdo->prepare("SELECT ti.*, c.name as category_name FROM transaction_items ti LEFT JOIN categories c ON ti.category_id = c.id WHERE ti.transaction_id = :tid");
         $stmtItems->execute(['tid' => $id]);
         $transaction['items'] = $stmtItems->fetchAll();
 
         Response::json(['status' => 'ok', 'transaction' => $transaction]);
     }
 
-    // POST /api/transactions
     public function store(): void {
         $user = Auth::user();
         if (!$user) Response::error('Unauthorized', 401);
@@ -72,72 +83,89 @@ class TransactionController {
         $type = $data['type'] ?? 'expense';
         $amount = $data['amount'] ?? 0;
         $counterparty = trim($data['counterparty'] ?? '');
-        $date = $data['transaction_date'] ?? date('Y-m-d');
-        $time = $data['transaction_time'] ?? date('H:i:s');
-        $datetime = $date . ' ' . $time;
+        $datetime = ($data['transaction_date'] ?? date('Y-m-d')) . ' ' . ($data['transaction_time'] ?? date('H:i:s'));
         $items = $data['items'] ?? [];
 
-        if (!$accountId || $amount <= 0) {
-            Response::error('Укажите счет и сумму больше нуля', 400);
-        }
+        if (!$accountId || $amount <= 0) Response::error('Укажите счет и сумму больше нуля', 400);
 
         $pdo = Database::getConnection();
 
         try {
             $pdo->beginTransaction();
 
-            $stmt = $pdo->prepare("
-                INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source) 
-                VALUES (:uid, :acc, :type, :amount, :counterparty, :date, 'manual')
-            ");
+            $stmt = $pdo->prepare("INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source) VALUES (:uid, :acc, :type, :amount, :counterparty, :date, 'manual')");
             $stmt->execute([
-                'uid' => $user['id'],
-                'acc' => $accountId,
-                'type' => $type,
-                'amount' => $amount,
-                'counterparty' => $counterparty,
-                'date' => $datetime
+                'uid' => $user['id'], 'acc' => $accountId, 'type' => $type,
+                'amount' => $amount, 'counterparty' => $counterparty, 'date' => $datetime
             ]);
             
             $transactionId = $pdo->lastInsertId();
 
             if (!empty($items) && is_array($items)) {
-                $stmtItem = $pdo->prepare("
-                    INSERT INTO transaction_items (transaction_id, category_id, name, quantity, unit_price, total_price) 
-                    VALUES (:tid, :cat, :name, :qty, :price, :total)
-                ");
-                
+                $stmtItem = $pdo->prepare("INSERT INTO transaction_items (transaction_id, category_id, name, quantity, unit_price, total_price) VALUES (:tid, :cat, :name, :qty, :price, :total)");
                 foreach ($items as $item) {
                     $stmtItem->execute([
-                        'tid' => $transactionId,
-                        'cat' => $item['category_id'] ?? null,
-                        'name' => $item['name'] ?? 'Без названия',
-                        'qty' => $item['quantity'] ?? 1,
-                        'price' => $item['unit_price'] ?? 0,
-                        'total' => $item['total_price'] ?? 0
+                        'tid' => $transactionId, 'cat' => $item['category_id'] ?? null,
+                        'name' => $item['name'] ?? 'Без названия', 'qty' => $item['quantity'] ?? 1,
+                        'price' => $item['unit_price'] ?? 0, 'total' => $item['total_price'] ?? 0
                     ]);
                 }
             }
 
-            if ($type === 'expense') {
-                $updateBalance = $pdo->prepare("UPDATE accounts SET balance = balance - :amount WHERE id = :acc_id AND user_id = :uid");
-            } elseif ($type === 'income') {
-                $updateBalance = $pdo->prepare("UPDATE accounts SET balance = balance + :amount WHERE id = :acc_id AND user_id = :uid");
-            } else {
-                $updateBalance = null;
-            }
-
-            if ($updateBalance) {
-                $updateBalance->execute(['amount' => $amount, 'acc_id' => $accountId, 'uid' => $user['id']]);
-            }
+            $updateBalance = $pdo->prepare($type === 'expense' 
+                ? "UPDATE accounts SET balance = balance - :amount WHERE id = :acc_id AND user_id = :uid"
+                : "UPDATE accounts SET balance = balance + :amount WHERE id = :acc_id AND user_id = :uid");
+            $updateBalance->execute(['amount' => $amount, 'acc_id' => $accountId, 'uid' => $user['id']]);
 
             $pdo->commit();
             Response::json(['status' => 'ok', 'id' => $transactionId], 201);
-
         } catch (\Exception $e) {
             $pdo->rollBack();
             error_log("Transaction Error: " . $e->getMessage());
             Response::error('Ошибка при создании транзакции', 500);
+        }
+    }
+
+    // PUT /api/transactions/{id}
+    public function update(array $params): void {
+        $user = Auth::user();
+        if (!$user) Response::error('Unauthorized', 401);
+        
+        $id = (int)$params['id'];
+        $pdo = Database::getConnection();
+
+        $stmt = $pdo->prepare("SELECT * FROM transactions WHERE id = :id AND user_id = :uid");
+        $stmt->execute(['id' => $id, 'uid' => $user['id']]);
+        $tx = $stmt->fetch();
+        
+        if (!$tx) Response::error('Транзакция не найдена', 404);
+        if (!$this->canEdit($user, $tx)) Response::error('Транзакция сверена, редактирование запрещено', 403);
+
+        $data = json_decode(file_get_contents('php://input'), true);
+        $amount = (float)($data['amount'] ?? 0);
+        $counterparty = trim($data['counterparty'] ?? '');
+        $datetime = ($data['transaction_date'] ?? date('Y-m-d')) . ' ' . ($data['transaction_time'] ?? '00:00:00');
+
+        if ($amount <= 0) Response::error('Сумма должна быть больше нуля', 400);
+
+        $pdo->beginTransaction();
+        try {
+            $stmtUpd = $pdo->prepare("UPDATE transactions SET amount = :amount, counterparty = :counterparty, transaction_date = :date WHERE id = :id");
+            $stmtUpd->execute(['amount' => $amount, 'counterparty' => $counterparty, 'date' => $datetime, 'id' => $id]);
+
+            // Пересчет баланса, если сумма изменилась
+            $diff = $amount - (float)$tx['amount'];
+            if ($diff != 0) {
+                $balStmt = $pdo->prepare($tx['type'] === 'expense' 
+                    ? "UPDATE accounts SET balance = balance - :diff WHERE id = :acc" 
+                    : "UPDATE accounts SET balance = balance + :diff WHERE id = :acc");
+                $balStmt->execute(['diff' => $diff, 'acc' => $tx['account_id']]);
+            }
+            $pdo->commit();
+            Response::json(['status' => 'ok']);
+        } catch (\Exception $e) {
+            $pdo->rollBack();
+            Response::error('Ошибка при обновлении', 500);
         }
     }
 
@@ -149,17 +177,12 @@ class TransactionController {
         $txId = (int)$params['id'];
         $pdo = Database::getConnection();
 
-        // Проверяем, что транзакция не сверена
-        $stmt = $pdo->prepare("SELECT amount, is_reconciled FROM transactions WHERE id = :id AND user_id = :uid");
+        $stmt = $pdo->prepare("SELECT * FROM transactions WHERE id = :id AND user_id = :uid");
         $stmt->execute(['id' => $txId, 'uid' => $user['id']]);
         $tx = $stmt->fetch();
 
-        if (!$tx) {
-            Response::error('Транзакция не найдена', 404);
-        }
-        if ($tx['is_reconciled']) {
-            Response::error('Транзакция уже сверена, редактирование запрещено', 403);
-        }
+        if (!$tx) Response::error('Транзакция не найдена', 404);
+        if (!$this->canEdit($user, $tx)) Response::error('Транзакция сверена, редактирование запрещено', 403);
 
         $stmtSum = $pdo->prepare("SELECT COALESCE(SUM(total_price), 0) as current_sum FROM transaction_items WHERE transaction_id = :tid");
         $stmtSum->execute(['tid' => $txId]);
@@ -172,29 +195,72 @@ class TransactionController {
         $totalPrice = $unitPrice * $quantity;
         $categoryId = $data['category_id'] ?? null;
 
-        if (empty($name) || $totalPrice <= 0) {
-            Response::error('Укажите название и корректную сумму позиции', 400);
-        }
+        if (empty($name) || $totalPrice <= 0) Response::error('Некорректные данные позиции', 400);
 
         $remaining = (float)$tx['amount'] - $currentSum;
-        if ($totalPrice > $remaining + 0.01) {
-            Response::error("Сумма позиции превышает остаток по чеку (" . number_format($remaining, 2) . " руб.)", 400);
-        }
+        if ($totalPrice > $remaining + 0.01) Response::error("Сумма позиции превышает остаток (" . number_format($remaining, 2) . " руб.)", 400);
 
-        $stmtInsert = $pdo->prepare("
-            INSERT INTO transaction_items (transaction_id, category_id, name, quantity, unit_price, total_price)
-            VALUES (:tid, :cat, :name, :qty, :price, :total)
-        ");
-        $stmtInsert->execute([
-            'tid' => $txId,
-            'cat' => $categoryId,
-            'name' => $name,
-            'qty' => $quantity,
-            'price' => $unitPrice,
-            'total' => $totalPrice
-        ]);
+        $stmtInsert = $pdo->prepare("INSERT INTO transaction_items (transaction_id, category_id, name, quantity, unit_price, total_price) VALUES (:tid, :cat, :name, :qty, :price, :total)");
+        $stmtInsert->execute(['tid' => $txId, 'cat' => $categoryId, 'name' => $name, 'qty' => $quantity, 'price' => $unitPrice, 'total' => $totalPrice]);
 
         Response::json(['status' => 'ok', 'id' => $pdo->lastInsertId()], 201);
+    }
+
+    // PUT /api/transactions/items/{itemId}
+    public function updateItem(array $params): void {
+        $user = Auth::user();
+        if (!$user) Response::error('Unauthorized', 401);
+
+        $itemId = (int)$params['itemId'];
+        $pdo = Database::getConnection();
+
+        $stmt = $pdo->prepare("SELECT ti.*, t.user_id, t.amount as tx_amount, t.is_reconciled FROM transaction_items ti JOIN transactions t ON ti.transaction_id = t.id WHERE ti.id = :item_id");
+        $stmt->execute(['item_id' => $itemId]);
+        $item = $stmt->fetch();
+
+        if (!$item || $item['user_id'] !== $user['id']) Response::error('Позиция не найдена', 404);
+        if (!$this->canEdit($user, $item)) Response::error('Транзакция сверена, редактирование запрещено', 403);
+
+        $data = json_decode(file_get_contents('php://input'), true);
+        $name = trim($data['name'] ?? '');
+        $unitPrice = (float)($data['unit_price'] ?? 0);
+        $quantity = (float)($data['quantity'] ?? 1);
+        $totalPrice = $unitPrice * $quantity;
+        $categoryId = $data['category_id'] ?? null;
+
+        // Проверка остатка (исключая старую сумму этой позиции)
+        $stmtSum = $pdo->prepare("SELECT COALESCE(SUM(total_price), 0) as current_sum FROM transaction_items WHERE transaction_id = :tid AND id != :item_id");
+        $stmtSum->execute(['tid' => $item['transaction_id'], 'item_id' => $itemId]);
+        $currentSum = (float)$stmtSum->fetch()['current_sum'];
+
+        $remaining = (float)$item['tx_amount'] - $currentSum;
+        if ($totalPrice > $remaining + 0.01) Response::error("Сумма позиции превышает остаток (" . number_format($remaining, 2) . " руб.)", 400);
+
+        $stmtUpd = $pdo->prepare("UPDATE transaction_items SET name = :name, category_id = :cat, quantity = :qty, unit_price = :price, total_price = :total WHERE id = :id");
+        $stmtUpd->execute(['name' => $name, 'cat' => $categoryId, 'qty' => $quantity, 'price' => $unitPrice, 'total' => $totalPrice, 'id' => $itemId]);
+
+        Response::json(['status' => 'ok']);
+    }
+
+    // DELETE /api/transactions/items/{itemId}
+    public function deleteItem(array $params): void {
+        $user = Auth::user();
+        if (!$user) Response::error('Unauthorized', 401);
+
+        $itemId = (int)$params['itemId'];
+        $pdo = Database::getConnection();
+
+        $stmt = $pdo->prepare("SELECT ti.id, t.user_id, t.is_reconciled FROM transaction_items ti JOIN transactions t ON ti.transaction_id = t.id WHERE ti.id = :item_id");
+        $stmt->execute(['item_id' => $itemId]);
+        $item = $stmt->fetch();
+
+        if (!$item || $item['user_id'] !== $user['id']) Response::error('Позиция не найдена', 404);
+        if (!$this->canEdit($user, $item)) Response::error('Транзакция сверена, редактирование запрещено', 403);
+
+        $stmtDel = $pdo->prepare("DELETE FROM transaction_items WHERE id = :id");
+        $stmtDel->execute(['id' => $itemId]);
+
+        Response::json(['status' => 'ok']);
     }
 
     // POST /api/transactions/{id}/reconcile
@@ -209,43 +275,5 @@ class TransactionController {
         $stmt->execute(['id' => $id, 'uid' => $user['id']]);
         
         Response::json(['status' => 'ok']);
-    }
-
-    // DELETE /api/transactions/items/{itemId}
-    public function deleteItem(array $params): void {
-        $user = Auth::user();
-        if (!$user) Response::error('Unauthorized', 401);
-
-        $itemId = (int)$params['itemId'];
-        $pdo = Database::getConnection();
-
-        // Проверяем, что позиция принадлежит транзакции пользователя и транзакция не сверена
-        $stmt = $pdo->prepare("
-            SELECT ti.id, t.is_reconciled 
-            FROM transaction_items ti
-            JOIN transactions t ON ti.transaction_id = t.id
-            WHERE ti.id = :item_id AND t.user_id = :uid
-        ");
-        $stmt->execute(['item_id' => $itemId, 'uid' => $user['id']]);
-        $item = $stmt->fetch();
-
-        if (!$item) Response::error('Позиция не найдена', 404);
-        
-        // Если сверено, проверяем права (пока разрешаем только админу, если добавим роли)
-        if ($item['is_reconciled']) {
-             // Здесь позже будет проверка: if ($user['role'] !== 'admin') ...
-             Response::error('Транзакция сверена, редактирование запрещено', 403);
-        }
-
-        $stmtDel = $pdo->prepare("DELETE FROM transaction_items WHERE id = :id");
-        $stmtDel->execute(['id' => $itemId]);
-
-        Response::json(['status' => 'ok']);
-    }
-
-    // 
-    private function canEdit(array $user, array $tx): bool {
-        if ($user['role'] === 'admin') return true;
-        return (int)$tx['is_reconciled'] === 0;
     }
 }
