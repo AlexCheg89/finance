@@ -65,7 +65,7 @@ export class TransactionDetailView {
                     ${canEdit ? `<div style="position: absolute; top: 20px; right: 20px;"><button id="edit-tx-btn" style="background: none; box-shadow: none; color: var(--primary); padding: 0; font-size: 1.2em;" title="Редактировать">&#9998;</button></div>` : ''}
                     
                     <h2>${tx.counterparty || 'Без контрагента'}</h2>
-                    <p style="color: var(--text-muted);">${tx.account_name} • ${formatDateTime(tx.transaction_date)}</p>
+                    <p style="color: var(--text-muted);">${tx.account_name} " ${formatDateTime(tx.transaction_date)}</p>
                     
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; font-size: 1.2em;">
                         <span>Сумма операции:</span>
@@ -75,6 +75,14 @@ export class TransactionDetailView {
                         </div>
                     </div>
                     ${remainingHTML}
+
+                    <!-- ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМА -->
+                    ${canEdit ? `
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.05); display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" id="tx-details-toggle" ${tx.items.length > 0 ? 'checked' : ''} style="width: auto; margin: 0;">
+                            <label for="tx-details-toggle" style="font-size: 0.9em; cursor: pointer;">С детализацией (позиции)</label>
+                        </div>
+                    ` : ''}
                 </div>
 
                 <h3>Позиции</h3>
@@ -89,8 +97,8 @@ export class TransactionDetailView {
                             <div style="display: flex; align-items: center; gap: 10px;">
                                 <strong>${formatMoney(item.total_price, 'RUB')}</strong>
                                 ${canEdit ? `
-                                    <button class="edit-item-btn" data-id="${item.id}" data-name="${item.name}" data-price="${item.unit_price}" data-qty="${item.quantity}" data-cat="${item.category_id}" style="background: none; color: var(--primary); padding: 5px; font-size: 1.1em; box-shadow: none;" title="Редактировать">&#9998;</button>
-                                    <button class="delete-item-btn" data-id="${item.id}" style="background: none; color: var(--danger); padding: 5px; font-size: 1.1em; box-shadow: none;" title="Удалить">&#10006;</button>
+                                    <button class="edit-item-btn" data-id="${item.id}" data-name="${item.name}" data-price="${item.unit_price}" data-qty="${item.quantity}" data-cat="${item.category_id}" style="background: none; color: var(--primary); padding: 5px; font-size: 1.1em; box-shadow: none;" title="Удалить">&#9998;</button>
+                                    <button class="delete-item-btn" data-id="${item.id}" style="background: none; color: var(--danger); padding: 5px; font-size: 1.1em; box-shadow: none;" title="#40;8BL">&#10006;</button>
                                 ` : ''}
                             </div>
                         </div>
@@ -100,18 +108,26 @@ export class TransactionDetailView {
                 ${canEdit ? `
                     ${isExpense && !isFullyParsed ? `<button id="reconcile-btn" style="width: 100%; margin-bottom: 20px; background: var(--success);">&#10004; Сверить операцию</button>` : ''}
                     
-                    <div id="add-item-form-container" style="background: rgba(255,255,255,0.5); padding: 20px; border-radius: 12px;">
-                        <h3>Добавить позицию</h3>
-                        <form id="add-item-form">
-                            <input type="text" id="item-name" placeholder="Название (Молоко)" required>
-                            <div style="display: flex; gap: 10px;">
-                                <input type="number" id="item-price" placeholder="Цена" step="0.01" required style="flex: 1;">
-                                <input type="number" id="item-qty" placeholder="Кол-во" step="1" value="1" required style="flex: 1;">
-                            </div>
-                            <select id="item-category"><option value="">Без категории</option>${catOptions}</select>
-                            <button type="submit" style="margin-top: 10px; width: 100%;">Добавить</button>
-                        </form>
-                    </div>
+                    ${tx.items.length === 0 ? `
+                        <div style="background: rgba(255,255,255,0.5); padding: 20px; border-radius: 12px; text-align: center;">
+                            <h3>Нет детализации</h3>
+                            <p style="color: var(--text-muted); margin-bottom: 15px;">Вы можете сразу назначить категорию на всю сумму.</p>
+                            <button id="assign-category-btn" style="width: 100%;">Назначить категорию на всю сумму</button>
+                        </div>
+                    ` : `
+                        <div id="add-item-form-container" style="background: rgba(255,255,255,0.5); padding: 20px; border-radius: 12px;">
+                            <h3>Добавить позицию</h3>
+                            <form id="add-item-form">
+                                <input type="text" id="item-name" placeholder="Название (Молоко)" required>
+                                <div style="display: flex; gap: 10px;">
+                                    <input type="number" id="item-price" placeholder="Цена" step="0.01" required style="flex: 1;">
+                                    <input type="number" id="item-qty" placeholder="Кол-во" step="1" value="1" required style="flex: 1;">
+                                </div>
+                                <select id="item-category"><option value="">Без категории</option>${catOptions}</select>
+                                <button type="submit" style="margin-top: 10px; width: 100%;">Добавить</button>
+                            </form>
+                        </div>
+                    `}
                 ` : `
                     <div style="text-align: center; padding: 20px; color: var(--success); font-weight: bold; background: rgba(255,255,255,0.5); border-radius: 12px;">
                         &#10004; Операция сверена и заблокирована
@@ -128,6 +144,21 @@ export class TransactionDetailView {
             document.getElementById('reconcile-btn')?.addEventListener('click', () => this.handleReconcile(container));
             document.getElementById('add-item-form')?.addEventListener('submit', (e) => this.handleAddItem(e, container));
             
+            const assignBtn = document.getElementById('assign-category-btn');
+            if (assignBtn) assignBtn.addEventListener('click', () => this.openAssignCategoryModal(container));
+
+            // Переключатель детализации
+            const detailsToggle = document.getElementById('tx-details-toggle');
+            if (detailsToggle) {
+                detailsToggle.addEventListener('change', (e) => {
+                    if (!e.target.checked) {
+                        this.switchToSingleCategory(container);
+                    } else {
+                        this.render(container);
+                    }
+                });
+            }
+
             document.querySelectorAll('.delete-item-btn').forEach(btn => {
                 btn.addEventListener('click', () => this.handleDeleteItem(btn.dataset.id, container));
             });
@@ -135,6 +166,37 @@ export class TransactionDetailView {
             document.querySelectorAll('.edit-item-btn').forEach(btn => {
                 btn.addEventListener('click', () => this.openEditItemModal(btn.dataset, container));
             });
+        }
+    }
+
+    async switchToSingleCategory(container) {
+        if (!confirm('Удалить все текущие позиции и назначить одну общую категорию на всю сумму?')) {
+            document.getElementById('tx-details-toggle').checked = true;
+            return;
+        }
+
+        try {
+            // Удаляем все текущие позиции
+            for (const item of this.tx.items) {
+                await api.delete(`/transactions/items/${item.id}`);
+            }
+
+            // Создаем одну общую позицию
+            await api.post(`/transactions/${this.tx.id}/items`, {
+                name: 'Основная сумма',
+                unit_price: this.tx.amount,
+                quantity: 1,
+                total_price: this.tx.amount,
+                category_id: null
+            });
+
+            showStatus('Позиции объединены', 'success');
+            const res = await api.get(`/transactions/${this.tx.id}`);
+            this.tx = res.transaction;
+            this.render(container);
+        } catch (err) {
+            showErrorModal(err.message);
+            document.getElementById('tx-details-toggle').checked = true;
         }
     }
 
@@ -202,7 +264,7 @@ export class TransactionDetailView {
                     transaction_time: document.getElementById('edit-time').value
                 });
                 modal.close();
-                showStatus('Операция обновлена', 'success');
+                showStatus('Редактировать позицию', 'success');
                 const res = await api.get(`/transactions/${tx.id}`);
                 this.tx = res.transaction;
                 this.render(container);
@@ -223,7 +285,7 @@ export class TransactionDetailView {
                     <input type="number" id="edit-item-qty" value="${itemData.qty}" step="1" required style="flex: 1;">
                 </div>
                 <select id="edit-item-category"><option value="">Без категории</option>${catOptions}</select>
-                <button type="submit" style="margin-top: 10px; width: 100%;">Сохранить</button>
+                <button type="submit" style="margin-top: 10px; width: 100%;">!>E@0=8BL</button>
             </form>
         `);
         modal.open();
@@ -243,6 +305,47 @@ export class TransactionDetailView {
                 this.tx = res.transaction;
                 this.render(container);
             } catch (err) { showErrorModal(err.message); }
+        });
+    }
+
+    openAssignCategoryModal(container) {
+        const catOptions = this.categories
+            .filter(c => c.parent_id === null)
+            .map(c => `<option value="${c.id}">${c.name}</option>`)
+            .join('');
+
+        const modal = new Modal('Назначить категорию', `
+            <form id="assign-category-form">
+                <p style="margin-bottom: 15px;">Выберите категорию для суммы ${formatMoney(this.tx.amount, 'RUB')}:</p>
+                <select id="assign-cat-id" required>
+                    <option value="">-- Выберите --</option>
+                    ${catOptions}
+                </select>
+                <button type="submit" style="margin-top: 10px; width: 100%;">Сохранить</button>
+            </form>
+        `);
+        modal.open();
+
+        document.getElementById('assign-category-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const catId = document.getElementById('assign-cat-id').value;
+            
+            try {
+                await api.post(`/transactions/${this.tx.id}/items`, {
+                    name: 'Основная сумма',
+                    unit_price: this.tx.amount,
+                    quantity: 1,
+                    total_price: this.tx.amount,
+                    category_id: parseInt(catId)
+                });
+                modal.close();
+                showStatus('Категория назначена', 'success');
+                const res = await api.get(`/transactions/${this.tx.id}`);
+                this.tx = res.transaction;
+                this.render(container);
+            } catch (err) {
+                showErrorModal(err.message);
+            }
         });
     }
 }
