@@ -242,4 +242,10 @@ class TransactionController {
 
         Response::json(['status' => 'ok']);
     }
+
+    // 
+    private function canEdit(array $user, array $tx): bool {
+        if ($user['role'] === 'admin') return true;
+        return (int)$tx['is_reconciled'] === 0;
+    }
 }

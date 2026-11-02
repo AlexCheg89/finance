@@ -30,7 +30,6 @@ class Auth {
             session_regenerate_id(true);
 
             $_SESSION['user_id'] = $user['id'];
-            $_SESSION['username'] = $username;
             return true;
         }
 
@@ -52,9 +51,18 @@ class Auth {
         self::startSession();
         if (!self::check()) return null;
 
-        return [
-            'id' => $_SESSION['user_id'],
-            'username' => $_SESSION['username']
-        ];
+        // Запрашиваем актуальные данные из БД (включая роль)
+        $pdo = Database::getConnection();
+        $stmt = $pdo->prepare("SELECT id, username, role FROM users WHERE id = :id");
+        $stmt->execute(['id' => $_SESSION['user_id']]);
+        $user = $stmt->fetch();
+
+        // Если пользователя удалили из базы, но сессия еще жива
+        if (!$user) {
+            self::logout();
+            return null;
+        }
+
+        return $user;
     }
 }
