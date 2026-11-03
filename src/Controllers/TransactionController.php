@@ -85,6 +85,7 @@ class TransactionController {
         $counterparty = trim($data['counterparty'] ?? '');
         $datetime = ($data['transaction_date'] ?? date('Y-m-d')) . ' ' . ($data['transaction_time'] ?? date('H:i:s'));
         $items = $data['items'] ?? [];
+        $hasDetails = isset($data['has_details']) ? (int)$data['has_details'] : 1;
 
         if (!$accountId || $amount <= 0) Response::error('Укажите счет и сумму больше нуля', 400);
 
@@ -93,10 +94,11 @@ class TransactionController {
         try {
             $pdo->beginTransaction();
 
-            $stmt = $pdo->prepare("INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source) VALUES (:uid, :acc, :type, :amount, :counterparty, :date, 'manual')");
+            $stmt = $pdo->prepare("INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source, has_details) VALUES (:uid, :acc, :type, :amount, :counterparty, :date, 'manual', :has_details)");
             $stmt->execute([
                 'uid' => $user['id'], 'acc' => $accountId, 'type' => $type,
-                'amount' => $amount, 'counterparty' => $counterparty, 'date' => $datetime
+                'amount' => $amount, 'counterparty' => $counterparty, 'date' => $datetime,
+                'has_details' => $hasDetails
             ]);
             
             $transactionId = $pdo->lastInsertId();
@@ -121,7 +123,6 @@ class TransactionController {
             Response::json(['status' => 'ok', 'id' => $transactionId], 201);
         } catch (\Exception $e) {
             $pdo->rollBack();
-            error_log("Transaction Error: " . $e->getMessage());
             Response::error('Ошибка при создании транзакции', 500);
         }
     }
@@ -139,9 +140,39 @@ class TransactionController {
         $tx = $stmt->fetch();
         
         if (!$tx) Response::error('Транзакция не найдена', 404);
-        if (!$this->canEdit($user, $tx)) Response::error('Транзакция сверена, редактирование запрещено', 403);
+        if (!$this->canEdit($user, $tx)) Response::error('Транзакция сверена', 403);
 
         $data = json_decode(file_get_contents('php://input'), true);
+        
+        // Если передан только флаг has_details (для переключателя)
+        if (isset($data['has_details']) && count($data) === 1) {
+            $hasDetails = (int)$data['has_details'];
+            
+            $pdo->beginTransaction();
+            try {
+                // Обновляем флаг
+                $stmtUpd = $pdo->prepare("UPDATE transactions SET has_details = :hd WHERE id = :id");
+                $stmtUpd->execute(['hd' => $hasDetails, 'id' => $id]);
+
+                // Если переключили в "без детализации", удаляем все позиции и создаем одну
+                if ($hasDetails === 0) {
+                    $stmtDel = $pdo->prepare("DELETE FROM transaction_items WHERE transaction_id = :id");
+                    $stmtDel->execute(['id' => $id]);
+                    
+                    $stmtIns = $pdo->prepare("INSERT INTO transaction_items (transaction_id, name, quantity, unit_price, total_price) VALUES (:id, 'Основная сумма', 1, :amount, :amount)");
+                    $stmtIns->execute(['id' => $id, 'amount' => $tx['amount']]);
+                }
+                
+                $pdo->commit();
+                Response::json(['status' => 'ok']);
+            } catch (\Exception $e) {
+                $pdo->rollBack();
+                Response::error('Ошибка при переключении', 500);
+            }
+            return;
+        }
+
+        // Стандартное обновление
         $amount = (float)($data['amount'] ?? 0);
         $counterparty = trim($data['counterparty'] ?? '');
         $datetime = ($data['transaction_date'] ?? date('Y-m-d')) . ' ' . ($data['transaction_time'] ?? '00:00:00');
@@ -153,7 +184,6 @@ class TransactionController {
             $stmtUpd = $pdo->prepare("UPDATE transactions SET amount = :amount, counterparty = :counterparty, transaction_date = :date WHERE id = :id");
             $stmtUpd->execute(['amount' => $amount, 'counterparty' => $counterparty, 'date' => $datetime, 'id' => $id]);
 
-            // Пересчет баланса, если сумма изменилась
             $diff = $amount - (float)$tx['amount'];
             if ($diff != 0) {
                 $balStmt = $pdo->prepare($tx['type'] === 'expense' 

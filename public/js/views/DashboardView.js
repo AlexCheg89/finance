@@ -155,7 +155,8 @@ export class DashboardView {
                 counterparty: document.getElementById('tx-counterparty').value,
                 transaction_date: document.getElementById('tx-date').value,
                 transaction_time: document.getElementById('tx-time').value,
-                items: items
+                items: items,
+                has_details: hasDetails // <-- Передаем флаг
             };
 
             try {
