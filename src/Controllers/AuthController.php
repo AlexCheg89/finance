@@ -3,9 +3,8 @@ namespace App\Controllers;
 
 use App\Response;
 use App\Auth;
-use App\Database;
 
-class AuthController {
+class AuthController extends Controller {
 
     // POST /api/auth/login
     public function login(): void {
@@ -17,7 +16,7 @@ class AuthController {
         $password = trim($data['password'] ?? '');
 
         // ВРЕМЕННАЯ ОТЛАДКА
-file_put_contents('/tmp/auth_debug.log', date('Y-m-d H:i:s') . " | INPUT: " . print_r($data, true) . PHP_EOL, FILE_APPEND);
+        //file_put_contents('/tmp/auth_debug.log', date('Y-m-d H:i:s') . " | INPUT: " . print_r($data, true) . PHP_EOL, FILE_APPEND);
 
         if (empty($username) || empty($password)) {
             Response::error('Введите логин и пароль', 400);
@@ -36,16 +35,12 @@ file_put_contents('/tmp/auth_debug.log', date('Y-m-d H:i:s') . " | INPUT: " . pr
     // POST /api/auth/logout
     public function logout(): void {
         Auth::logout();
-        Response::json(['status' => 'ok', 'message' => 'Вы вышли из системы']);
+        $this->success(['message' => 'Вы вышли из системы']);
     }
 
     // GET /api/auth/me
     public function me(): void {
-        $user = Auth::user();
-        if ($user) {
-            Response::json(['status' => 'ok', 'user' => $user]);
-        } else {
-            Response::error('Не авторизован', 401);
-        }
+        $user = $this->requireAuth();
+        $this->success(['user' => $user]);        
     }
 }

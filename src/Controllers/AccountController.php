@@ -1,58 +1,33 @@
 <?php
 namespace App\Controllers;
 
+use App\Models\Account;
 use App\Response;
-use App\Auth;
-use App\Database;
 
-class AccountController {
+class AccountController extends Controller{
     
     // GET /api/accounts
     public function index(): void {
-        $user = Auth::user();
-        if (!$user) Response::error('Unauthorized', 401);
-
-        $pdo = Database::getConnection();
-        $stmt = $pdo->prepare("
-            SELECT id, name, type, currency, balance, is_active 
-            FROM accounts 
-            WHERE user_id = :uid 
-            ORDER BY id DESC
-        ");
-        $stmt->execute(['uid' => $user['id']]);
-        $accounts = $stmt->fetchAll();
-
-        Response::json(['status' => 'ok', 'accounts' => $accounts]);
+        $user = $this->requireAuth();
+        $accounts = Account::getByUser($user['id']);
+        $this->success(['accounts' => $accounts]);
     }
 
     // GET /api/accounts/{id}
     public function show(array $params): void {
-        $user = Auth::user();
-        if (!$user) Response::error('Unauthorized', 401);
+        $user = $this->requireAuth();
+        $account = Account::find((int)$params['id']);
 
-        $id = (int)$params['id'];
-        $pdo = Database::getConnection();
-        
-        $stmt = $pdo->prepare("
-            SELECT id, name, type, currency, balance, is_active, created_at, updated_at 
-            FROM accounts 
-            WHERE id = :id AND user_id = :uid
-        ");
-        $stmt->execute(['id' => $id, 'uid' => $user['id']]);
-        $account = $stmt->fetch();
-
-        if (!$account) {
+        if (!$account || $account['user_id'] !== $user['id']) {
             Response::error('Счет не найден', 404);
         }
 
-        Response::json(['status' => 'ok', 'account' => $account]);
+        $this->success(['account' => $account]);
     }
 
     // POST /api/accounts
     public function store(): void {
-        $user = Auth::user();
-        if (!$user) Response::error('Unauthorized', 401);
-
+        $user = $this->requireAuth();
         $data = json_decode(file_get_contents('php://input'), true);
         
         $name = trim($data['name'] ?? '');
@@ -68,21 +43,7 @@ class AccountController {
             Response::error('Недопустимый тип счета', 400);
         }
 
-        $pdo = Database::getConnection();
-        $stmt = $pdo->prepare("
-            INSERT INTO accounts (user_id, name, type, currency, balance) 
-            VALUES (:uid, :name, :type, :currency, 0)
-        ");
-        $stmt->execute([
-            'uid' => $user['id'],
-            'name' => $name,
-            'type' => $type,
-            'currency' => $currency
-        ]);
-
-        Response::json([
-            'status' => 'ok', 
-            'id' => $pdo->lastInsertId()
-        ], 201);
+        $id = Account::create($user['id'], $name, $type, $currency);
+        $this->success(['id' => $id], 201);
     }
 }
