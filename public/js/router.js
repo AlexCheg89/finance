@@ -17,6 +17,9 @@ export const router = {
         let path = window.location.hash.replace('#', '') || '/dashboard';
         
         // Обработка динамических ID (например, /transaction/2)
+        if (path.startsWith('/account/')) {
+            path = '/account';
+        }
         if (path.startsWith('/transaction/')) {
             path = '/transaction';
         }

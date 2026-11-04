@@ -21,6 +21,7 @@ use App\Controllers\AuthController;
 use App\Controllers\AccountController;
 use App\Controllers\TransactionController;
 use App\Controllers\CategoryController;
+use App\Controllers\BudgetController;
 
 Env::load(__DIR__ . '/../../.env');
 
@@ -38,6 +39,7 @@ $router->add('GET',  '/api/auth/me', function() { (new AuthController())->me(); 
 $router->add('GET',  '/api/accounts', function() { (new AccountController())->index(); });
 $router->add('POST', '/api/accounts', function() { (new AccountController())->store(); });
 $router->add('GET',  '/api/accounts/{id}', function($p) { (new AccountController())->show($p); });
+$router->add('POST', '/api/accounts/{id}/recalculate-balance', function($p) { (new AccountController())->recalculateBalance($p); });
 
 // Categories
 $router->add('GET', '/api/categories', function() { (new CategoryController())->index(); });
@@ -55,5 +57,8 @@ $router->add('DELETE', '/api/transactions/items/{itemId}', function($p) { (new T
 
 // Reconcile
 $router->add('POST', '/api/transactions/{id}/reconcile', function($p) { (new TransactionController())->reconcile($p); });
+
+// BudgetView
+$router->add('GET', '/api/budget', function() { (new BudgetController())->index(); });
 
 $router->dispatch($method, $uri);
