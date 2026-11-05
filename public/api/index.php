@@ -47,6 +47,7 @@ $router->add('GET', '/api/categories', function() { (new CategoryController())->
 // Transactions
 $router->add('GET',  '/api/transactions', function() { (new TransactionController())->index(); });
 $router->add('POST', '/api/transactions', function() { (new TransactionController())->store(); });
+$router->add('GET', '/api/transactions/templates', function() { (new TransactionController())->templates(); });
 $router->add('GET',  '/api/transactions/{id}', function($p) { (new TransactionController())->show($p); });
 $router->add('PUT',  '/api/transactions/{id}', function($p) { (new TransactionController())->update($p); });
 

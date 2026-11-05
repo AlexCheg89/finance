@@ -115,4 +115,11 @@ class TransactionController extends Controller {
         
         $this->success();
     }
+
+    // GET /api/transactions/templates
+    public function templates(): void {
+        $user = $this->requireAuth();
+        $templates = Transaction::getTemplates($user['id']);
+        $this->success(['templates' => $templates]);
+    }
 }

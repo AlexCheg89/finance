@@ -191,8 +191,19 @@ export class BudgetView {
             return;
         }
 
+        // Загружаем шаблоны
+        const tmplRes = await api.get('/transactions/templates');
+        const templates = tmplRes.templates || [];
+
         const accountOptions = accRes.accounts.map(acc => 
             `<option value="${acc.id}">${acc.name}</option>`
+        ).join('');
+
+        // Формируем опции для шаблонов
+        const templateOptions = templates.map(t => 
+            `<option value="${t.id}" data-type="${t.type}" data-amount="${t.amount}" data-counterparty="${t.counterparty}" data-account="${t.account_id}" data-details="${t.has_details}">
+                ${t.counterparty} (${t.type === 'income' ? '+' : '-'}${t.amount} ₽)
+            </option>`
         ).join('');
 
         const today = new Date();
@@ -201,8 +212,18 @@ export class BudgetView {
 
         const formHTML = `
             <form id="plan-tx-form">
+                ${templates.length > 0 ? `
+                    <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid rgba(0,0,0,0.1);">
+                        <label class="col-muted" style="font-size: 0.85em;">Выбрать из шаблонов (регулярные):</label>
+                        <select id="template-select">
+                            <option value="">-- Новый план --</option>
+                            ${templateOptions}
+                        </select>
+                    </div>
+                ` : ''}
+
                 <div class="col-muted" style="margin-bottom: 10px; font-size: 0.9em;">
-                    Эта операция будет добавлена как <strong>План</strong> и не изменит текущий баланс.
+                    Эта операция будет добавлена как <strong>План</strong>.
                 </div>
                 
                 <select id="plan-type">
@@ -218,13 +239,34 @@ export class BudgetView {
                     <input type="date" id="plan-date" value="${defaultDate}" required style="flex: 2;">
                     <input type="time" id="plan-time" value="12:00" required style="flex: 1;">
                 </div>
+
+                <div style="margin-top: 15px; display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="plan-is-regular" style="width: auto; margin: 0;">
+                    <label for="plan-is-regular" style="font-size: 0.9em; cursor: pointer;">Сделать шаблоном (регулярная)</label>
+                </div>
                 
-                <button type="submit" style="margin-top: 10px; width: 100%;">Сохранить в план</button>
+                <button type="submit" style="margin-top: 15px; width: 100%;">Сохранить в план</button>
             </form>
         `;
 
         const modal = new Modal('Запланировать операцию', formHTML);
         modal.open();
+
+        // Обработчик выбора шаблона
+        const templateSelect = document.getElementById('template-select');
+        if (templateSelect) {
+            templateSelect.addEventListener('change', (e) => {
+                const option = e.target.selectedOptions[0];
+                if (!option.value) return; // Если выбрали "Новый план"
+
+                // Заполняем поля данными из шаблона
+                document.getElementById('plan-type').value = option.dataset.type;
+                document.getElementById('plan-amount').value = option.dataset.amount;
+                document.getElementById('plan-counterparty').value = option.dataset.counterparty;
+                document.getElementById('plan-account').value = option.dataset.account;
+                document.getElementById('plan-is-regular').checked = true; // Оставляем галочку
+            });
+        }
 
         document.getElementById('plan-tx-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -236,7 +278,8 @@ export class BudgetView {
                 transaction_date: document.getElementById('plan-date').value,
                 transaction_time: document.getElementById('plan-time').value,
                 has_details: 0, 
-                status: 'planned' 
+                status: 'planned',
+                is_regular: document.getElementById('plan-is-regular').checked // <-- Передаем флаг
             };
 
             try {

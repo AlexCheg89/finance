@@ -69,14 +69,15 @@ class Transaction extends Model {
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare("
-                INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source, has_details, status) 
-                VALUES (:uid, :acc, :type, :amount, :counterparty, :date, 'manual', :has_details, :status)
+                INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source, has_details, status, is_regular) 
+                VALUES (:uid, :acc, :type, :amount, :counterparty, :date, 'manual', :has_details, :status, :is_regular)
             ");
             $stmt->execute([
                 'uid' => $userId, 'acc' => $data['account_id'], 'type' => $data['type'],
                 'amount' => $data['amount'], 'counterparty' => $data['counterparty'], 
                 'date' => $data['transaction_date'],
-                'has_details' => $data['has_details'] ?? 1, 'status' => $data['status'] ?? 'actual'
+                'has_details' => $data['has_details'] ?? 1, 'status' => $data['status'] ?? 'actual', 
+                'is_regular' => $data['is_regular'] ?? 0
             ]);
             
             $transactionId = $pdo->lastInsertId();
@@ -207,5 +208,18 @@ class Transaction extends Model {
             $pdo->rollBack();
             throw $e;
         }
+    }
+
+    // Получить список шаблонов (регулярных плановых операций)
+    public static function getTemplates(int $userId): array {
+        $instance = new static();
+        $stmt = $instance->db->prepare("
+            SELECT id, type, amount, counterparty, account_id, has_details 
+            FROM transactions 
+            WHERE user_id = :uid AND is_regular = 1 AND status = 'planned'
+            ORDER BY counterparty ASC
+        ");
+        $stmt->execute(['uid' => $userId]);
+        return $stmt->fetchAll();
     }
 }
