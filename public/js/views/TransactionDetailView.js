@@ -70,7 +70,14 @@ export class TransactionDetailView {
                     
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; font-size: 1.2em;">
                         <span>Сумма операции:</span>
-                        <div style="display: flex; align-items: center;">
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <!-- Кнопка переключения статуса -->
+                            ${canEdit ? `
+                                <button id="toggle-status-btn" style="width: auto; padding: 5px 10px; font-size: 0.8em; background: ${tx.status === 'planned' ? 'var(--success)' : '#6c757d'};">
+                                    ${tx.status === 'planned' ? '&#10004; Сделать фактом' : '&#8635; Вернуть в план'}
+                                </button>
+                            ` : ''}
+                            
                             <strong style="color: ${color}">${sign}${formatMoney(tx.amount, 'RUB')}</strong>
                             ${reconciledHTML}
                         </div>
@@ -162,6 +169,27 @@ export class TransactionDetailView {
 
             document.querySelectorAll('.edit-item-btn').forEach(btn => {
                 btn.addEventListener('click', () => this.openEditItemModal(btn.dataset, container));
+            });
+        }
+        const toggleStatusBtn = document.getElementById('toggle-status-btn');
+        if (toggleStatusBtn) {
+            toggleStatusBtn.addEventListener('click', async () => {
+                const newStatus = tx.status === 'planned' ? 'actual' : 'planned';
+                try {
+                    await api.put(`/transactions/${tx.id}`, { 
+                        amount: tx.amount, 
+                        counterparty: tx.counterparty, 
+                        transaction_date: tx.transaction_date.split(' ')[0],
+                        transaction_time: tx.transaction_date.split(' ')[1] || '12:00',
+                        status: newStatus 
+                    });
+                    showStatus('Статус изменен', 'success');
+                    const res = await api.get(`/transactions/${tx.id}`);
+                    this.tx = res.transaction;
+                    this.render(container);
+                } catch (err) {
+                    showErrorModal(err.message);
+                }
             });
         }
     }
@@ -260,13 +288,30 @@ export class TransactionDetailView {
 
         const modal = new Modal('Редактировать операцию', `
             <form id="edit-tx-form">
+                <label class="col-muted" style="font-size: 0.85em;">Статус</label>
+                <select id="edit-status">
+                    <option value="actual" ${tx.status === 'actual' ? 'selected' : ''}>Факт (деньги ушли)</option>
+                    <option value="planned" ${tx.status === 'planned' ? 'selected' : ''}>План (ожидается)</option>
+                </select>
+
+                <label class="col-muted" style="font-size: 0.85em;">Сумма</label>
                 <input type="number" id="edit-amount" value="${tx.amount}" step="0.01" required>
+                
+                <label class="col-muted" style="font-size: 0.85em;">Контрагент</label>
                 <input type="text" id="edit-counterparty" value="${tx.counterparty || ''}">
+                
                 <div style="display: flex; gap: 10px;">
-                    <input type="date" id="edit-date" value="${dateStr}" required style="flex: 2;">
-                    <input type="time" id="edit-time" value="${timeStr}" required style="flex: 1;">
+                    <div style="flex: 2;">
+                        <label class="col-muted" style="font-size: 0.85em;">Дата</label>
+                        <input type="date" id="edit-date" value="${dateStr}" required style="margin-bottom: 0;">
+                    </div>
+                    <div style="flex: 1;">
+                        <label class="col-muted" style="font-size: 0.85em;">Время</label>
+                        <input type="time" id="edit-time" value="${timeStr}" required style="margin-bottom: 0;">
+                    </div>
                 </div>
-                <button type="submit" style="margin-top: 10px; width: 100%;">Сохранить</button>
+                
+                <button type="submit" style="margin-top: 15px; width: 100%;">Сохранить</button>
             </form>
         `);
         modal.open();
@@ -278,7 +323,8 @@ export class TransactionDetailView {
                     amount: parseFloat(document.getElementById('edit-amount').value),
                     counterparty: document.getElementById('edit-counterparty').value,
                     transaction_date: document.getElementById('edit-date').value,
-                    transaction_time: document.getElementById('edit-time').value
+                    transaction_time: document.getElementById('edit-time').value,
+                    status: document.getElementById('edit-status').value
                 });
                 modal.close();
                 showStatus('Редактировать позицию', 'success');

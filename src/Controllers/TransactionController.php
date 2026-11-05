@@ -51,25 +51,25 @@ class TransactionController extends Controller {
         $id = (int)$params['id'];
         
         $tx = Transaction::find($id);
-        if (!$tx || $tx['user_id'] !== $user['id']) {
-            Response::error('Транзакция не найдена', 404);
-        }
-        if (!$this->canEdit($user, $tx)) {
-            Response::error('Транзакция сверена, редактирование запрещено', 403);
-        }
+        if (!$tx || $tx['user_id'] !== $user['id']) Response::error('Транзакция не найдена', 404);
+        if (!$this->canEdit($user, $tx)) Response::error('Транзакция сверена', 403);
 
         $data = json_decode(file_get_contents('php://input'), true);
         
-        // Переключение детализации
+        // Обработка только флага has_details (переключатель детализации)
         if (isset($data['has_details']) && count($data) === 1) {
             Transaction::toggleDetails($id, (bool)$data['has_details'], (float)$tx['amount']);
             $this->success();
             return;
         }
 
-        // Стандартное обновление (в будущем тоже можно вынести в Модель)
-        // ... (оставляем как было, либо переносим в Модель)
-        $this->success();
+        // Полное обновление (включая смену статуса)
+        try {
+            Transaction::updateTransaction($id, $data, $user['id']);
+            $this->success();
+        } catch (\Exception $e) {
+            Response::error('Ошибка при обновлении: ' . $e->getMessage(), 500);
+        }
     }
 
     public function addItem(array $params): void {

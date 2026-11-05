@@ -145,4 +145,67 @@ class Transaction extends Model {
             throw $e;
         }
     }
+
+    // Обновить транзакцию с учетом смены статуса и баланса
+    public static function updateTransaction(int $id, array $data, int $userId): void {
+        $instance = new static();
+        $pdo = $instance->db;
+        
+        $oldTx = self::find($id);
+        if (!$oldTx || $oldTx['user_id'] !== $userId) return;
+
+        $oldStatus = $oldTx['status'];
+        $newStatus = $data['status'] ?? $oldStatus;
+        $oldAmount = (float)$oldTx['amount'];
+        $newAmount = (float)($data['amount'] ?? $oldAmount);
+        
+        $datetime = ($data['transaction_date'] ?? date('Y-m-d')) . ' ' . ($data['transaction_time'] ?? '00:00:00');
+
+        $pdo->beginTransaction();
+        try {
+            // 1. Обновляем саму транзакцию
+            $stmtUpd = $pdo->prepare("
+                UPDATE transactions 
+                SET amount = :amount, counterparty = :counterparty, transaction_date = :date, status = :status 
+                WHERE id = :id
+            ");
+            $stmtUpd->execute([
+                'amount' => $newAmount,
+                'counterparty' => trim($data['counterparty'] ?? ''),
+                'date' => $datetime,
+                'status' => $newStatus,
+                'id' => $id
+            ]);
+
+            // 2. Корректируем баланс счета
+            // Если статус был planned, а стал actual (или наоборот), или изменилась сумма у actual
+            if ($oldStatus === 'planned' && $newStatus === 'actual') {
+                // Списываем/прибавляем новую сумму
+                $balStmt = $pdo->prepare($oldTx['type'] === 'expense' 
+                    ? "UPDATE accounts SET balance = balance - :amount WHERE id = :acc" 
+                    : "UPDATE accounts SET balance = balance + :amount WHERE id = :acc");
+                $balStmt->execute(['amount' => $newAmount, 'acc' => $oldTx['account_id']]);
+            } 
+            elseif ($oldStatus === 'actual' && $newStatus === 'planned') {
+                // Возвращаем старую сумму обратно
+                $balStmt = $pdo->prepare($oldTx['type'] === 'expense' 
+                    ? "UPDATE accounts SET balance = balance + :amount WHERE id = :acc" 
+                    : "UPDATE accounts SET balance = balance - :amount WHERE id = :acc");
+                $balStmt->execute(['amount' => $oldAmount, 'acc' => $oldTx['account_id']]);
+            }
+            elseif ($oldStatus === 'actual' && $newStatus === 'actual' && $oldAmount !== $newAmount) {
+                // Если просто изменили сумму факта
+                $diff = $newAmount - $oldAmount;
+                $balStmt = $pdo->prepare($oldTx['type'] === 'expense' 
+                    ? "UPDATE accounts SET balance = balance - :diff WHERE id = :acc" 
+                    : "UPDATE accounts SET balance = balance + :diff WHERE id = :acc");
+                $balStmt->execute(['diff' => $diff, 'acc' => $oldTx['account_id']]);
+            }
+
+            $pdo->commit();
+        } catch (\Exception $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
 }
