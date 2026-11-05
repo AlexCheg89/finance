@@ -10,13 +10,25 @@ class Budget {
         
         $startDate = $month . '-01';
         $endDate = date('Y-m-t', strtotime($startDate));
+        
+        // Вычисляем предыдущий месяц
+        $prevMonthDate = date('Y-m', strtotime($startDate . ' -1 month'));
 
-        // 1. Текущий баланс (реальные деньги на счетах)
-        $stmtBal = $pdo->prepare("SELECT COALESCE(SUM(balance), 0) as total_balance FROM accounts WHERE user_id = :uid");
-        $stmtBal->execute(['uid' => $userId]);
-        $currentBalance = (float)$stmtBal->fetch()['total_balance'];
+        // 1. Пытаемся взять баланс из снимка предыдущего месяца
+        $stmtSnap = $pdo->prepare("SELECT total_balance FROM monthly_snapshots WHERE user_id = :uid AND month = :month");
+        $stmtSnap->execute(['uid' => $userId, 'month' => $prevMonthDate]);
+        $snapshot = $stmtSnap->fetch();
 
-        // 2. Получаем все транзакции за месяц
+        if ($snapshot) {
+            $startBalance = (float)$snapshot['total_balance'];
+        } else {
+            // Если снимка нет (например, это первый месяц), берем initial_balance всех счетов
+            $stmtInit = $pdo->prepare("SELECT COALESCE(SUM(initial_balance), 0) as total FROM accounts WHERE user_id = :uid");
+            $stmtInit->execute(['uid' => $userId]);
+            $startBalance = (float)$stmtInit->fetch()['total'];
+        }
+
+        // 2. Получаем транзакции за месяц
         $stmt = $pdo->prepare("
             SELECT t.*, a.name as account_name 
             FROM transactions t
@@ -34,12 +46,12 @@ class Budget {
         $transactions = $stmt->fetchAll();
 
         $timeline = [];
-        $runningBalance = $currentBalance;
+        $runningBalance = $startBalance;
 
         foreach ($transactions as $tx) {
             $isFuture = strtotime($tx['transaction_date']) > time() || $tx['status'] === 'planned';
             
-            // Получаем позиции для этой транзакции
+            // Получаем позиции
             $stmtItems = $pdo->prepare("
                 SELECT ti.*, c.name as category_name 
                 FROM transaction_items ti
@@ -50,26 +62,39 @@ class Budget {
             $items = $stmtItems->fetchAll();
 
             if (!empty($items)) {
-                // Если есть детализация, разворачиваем каждую позицию в отдельную строку
                 foreach ($items as $item) {
+                    // Меняем баланс
+                    if ($tx['type'] === 'income') {
+                        $runningBalance += (float)$item['total_price'];
+                    } else {
+                        $runningBalance -= (float)$item['total_price'];
+                    }
+
                     $timeline[] = [
-                        'id' => $tx['id'],
+                        'id' => $tx['id'], // <-- ДОБАВЛЕНО
+                        'is_reconciled' => $tx['is_reconciled'], // <-- ДОБАВЛЕНО
                         'transaction_date' => $tx['transaction_date'],
                         'counterparty' => $tx['counterparty'],
                         'account_name' => $tx['account_name'],
                         'type' => $tx['type'],
-                        'amount' => (float)$item['total_price'], // Сумма позиции
+                        'amount' => (float)$item['total_price'],
                         'status' => $tx['status'],
                         'category_name' => $item['category_name'] ?? null,
-                        'description' => $item['name'], // Название товара
+                        'description' => $item['name'],
                         'is_future' => $isFuture,
-                        'balance_after' => $runningBalance // Временно
+                        'balance_after' => $runningBalance
                     ];
                 }
             } else {
-                // Если детализации нет, создаем одну строку из шапки
+                if ($tx['type'] === 'income') {
+                    $runningBalance += (float)$tx['amount'];
+                } else {
+                    $runningBalance -= (float)$tx['amount'];
+                }
+
                 $timeline[] = [
-                    'id' => $tx['id'],
+                    'id' => $tx['id'], // <-- ДОБАВЛЕНО
+                    'is_reconciled' => $tx['is_reconciled'],
                     'transaction_date' => $tx['transaction_date'],
                     'counterparty' => $tx['counterparty'],
                     'account_name' => $tx['account_name'],
@@ -84,24 +109,9 @@ class Budget {
             }
         }
 
-        // Пересчитываем бегущий баланс
-        $runningBalance = $currentBalance;
-        
-        foreach ($timeline as &$row) {
-            if ($row['is_future']) {
-                if ($row['type'] === 'income') {
-                    $runningBalance += $row['amount'];
-                } else {
-                    $runningBalance -= $row['amount'];
-                }
-            }
-            // Для фактических операций баланс уже изменен, показываем текущий runningBalance
-            $row['balance_after'] = $runningBalance;
-        }
-
         return [
             'month' => $month,
-            'start_balance' => $currentBalance,
+            'start_balance' => $startBalance,
             'end_balance' => $runningBalance,
             'transactions' => $timeline
         ];

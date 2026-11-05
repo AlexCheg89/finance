@@ -60,5 +60,6 @@ $router->add('POST', '/api/transactions/{id}/reconcile', function($p) { (new Tra
 
 // BudgetView
 $router->add('GET', '/api/budget', function() { (new BudgetController())->index(); });
+$router->add('POST', '/api/budget/close-month', function() { (new BudgetController())->closeMonth(); });
 
 $router->dispatch($method, $uri);

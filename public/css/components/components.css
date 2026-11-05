@@ -95,3 +95,49 @@ input:focus, select:focus {
 .modal-close:hover { color: var(--danger); background: none; transform: none; }
 
 .modal-body { padding: 20px; }
+
+/* --- Таблица бюджета --- */
+.budget-table {
+    background: var(--glass-bg);
+    border-radius: 12px;
+    overflow-x: auto;
+}
+
+.budget-table-header,
+.budget-table-row {
+    display: grid;
+    grid-template-columns: 60px 120px 140px 90px 90px 140px 60px;
+    gap: 8px;
+    align-items: center;
+    min-width: 950px;
+}
+
+.budget-table-header {
+    padding: 15px;
+    font-weight: bold;
+    background: rgba(0, 0, 0, 0.05);
+    font-size: 0.85em;
+    color: var(--text-muted);
+}
+
+.budget-table-row {
+    padding: 10px 15px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    font-size: 0.9em;
+}
+
+.budget-table-row.future {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Выравнивание текста в ячейках */
+.col-right { text-align: right; white-space: nowrap; }
+.col-center { text-align: center; }
+.col-muted { color: var(--text-muted); }
+.col-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Цвета сумм */
+.text-income { color: var(--success); }
+.text-expense { color: var(--danger); }
+.text-balance-negative { color: var(--danger); font-weight: 600; }
+.text-balance-normal { color: var(--text-main); font-weight: 600; }
