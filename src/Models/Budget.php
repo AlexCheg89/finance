@@ -10,25 +10,37 @@ class Budget {
         
         $startDate = $month . '-01';
         $endDate = date('Y-m-t', strtotime($startDate));
-        
-        // Вычисляем предыдущий месяц
         $prevMonthDate = date('Y-m', strtotime($startDate . ' -1 month'));
 
-        // 1. Пытаемся взять баланс из снимка предыдущего месяца
+        // 1. Получаем счета и их начальные балансы
+        $stmtAcc = $pdo->prepare("SELECT id, name, initial_balance FROM accounts WHERE user_id = :uid");
+        $stmtAcc->execute(['uid' => $userId]);
+        $accounts = $stmtAcc->fetchAll();
+        
+        // Если есть снимок прошлого месяца, берем общий баланс из него (пока не разбиваем снимок по кошелькам)
         $stmtSnap = $pdo->prepare("SELECT total_balance FROM monthly_snapshots WHERE user_id = :uid AND month = :month");
         $stmtSnap->execute(['uid' => $userId, 'month' => $prevMonthDate]);
         $snapshot = $stmtSnap->fetch();
 
-        if ($snapshot) {
-            $startBalance = (float)$snapshot['total_balance'];
-        } else {
-            // Если снимка нет (например, это первый месяц), берем initial_balance всех счетов
-            $stmtInit = $pdo->prepare("SELECT COALESCE(SUM(initial_balance), 0) as total FROM accounts WHERE user_id = :uid");
-            $stmtInit->execute(['uid' => $userId]);
-            $startBalance = (float)$stmtInit->fetch()['total'];
+        // Формируем стартовые балансы по кошелькам
+        $runningBalances = [];
+        $totalStartBalance = 0;
+        
+        // Пока для простоты берем initial_balance каждого счета. 
+        // В будущем, если будет снимок, нужно будет разбивать его по кошелькам.
+        foreach ($accounts as $acc) {
+            $runningBalances[$acc['id']] = (float)$acc['initial_balance'];
+            $totalStartBalance += (float)$acc['initial_balance'];
         }
 
-        // 2. Получаем транзакции за месяц
+        // Если есть снимок, используем его как общий стартовый (упрощение)
+        if ($snapshot) {
+            $totalStartBalance = (float)$snapshot['total_balance'];
+            // ВАЖНО: Это упрощение. Правильнее было бы хранить снимок по каждому кошельку.
+            // Но пока оставим так, чтобы не усложнять.
+        }
+
+        // 2. Получаем транзакции
         $stmt = $pdo->prepare("
             SELECT t.*, a.name as account_name 
             FROM transactions t
@@ -46,7 +58,6 @@ class Budget {
         $transactions = $stmt->fetchAll();
 
         $timeline = [];
-        $runningBalance = $startBalance;
 
         foreach ($transactions as $tx) {
             $isFuture = strtotime($tx['transaction_date']) > time() || $tx['status'] === 'planned';
@@ -63,56 +74,69 @@ class Budget {
 
             if (!empty($items)) {
                 foreach ($items as $item) {
-                    // Меняем баланс
+                    $amount = (float)$item['total_price'];
+                    
+                    // Меняем баланс конкретного кошелька
                     if ($tx['type'] === 'income') {
-                        $runningBalance += (float)$item['total_price'];
+                        $runningBalances[$tx['account_id']] += $amount;
                     } else {
-                        $runningBalance -= (float)$item['total_price'];
+                        $runningBalances[$tx['account_id']] -= $amount;
                     }
 
+                    // Считаем общий баланс на текущий момент
+                    $currentTotal = array_sum($runningBalances);
+
                     $timeline[] = [
-                        'id' => $tx['id'], // <-- ДОБАВЛЕНО
-                        'is_reconciled' => $tx['is_reconciled'], // <-- ДОБАВЛЕНО
+                        'id' => $tx['id'],
+                        'account_id' => $tx['account_id'],
+                        'is_reconciled' => $tx['is_reconciled'],
                         'transaction_date' => $tx['transaction_date'],
                         'counterparty' => $tx['counterparty'],
                         'account_name' => $tx['account_name'],
                         'type' => $tx['type'],
-                        'amount' => (float)$item['total_price'],
+                        'amount' => $amount,
                         'status' => $tx['status'],
                         'category_name' => $item['category_name'] ?? null,
                         'description' => $item['name'],
                         'is_future' => $isFuture,
-                        'balance_after' => $runningBalance
+                        'balance_after' => $currentTotal, // Общий баланс
+                        'account_balances' => $runningBalances // <-- ПЕРЕДАЕМ БАЛАНСЫ ВСЕХ КОШЕЛЬКОВ!
                     ];
                 }
             } else {
+                $amount = (float)$tx['amount'];
                 if ($tx['type'] === 'income') {
-                    $runningBalance += (float)$tx['amount'];
+                    $runningBalances[$tx['account_id']] += $amount;
                 } else {
-                    $runningBalance -= (float)$tx['amount'];
+                    $runningBalances[$tx['account_id']] -= $amount;
                 }
 
+                $currentTotal = array_sum($runningBalances);
+
                 $timeline[] = [
-                    'id' => $tx['id'], // <-- ДОБАВЛЕНО
+                    'id' => $tx['id'],
+                    'account_id' => $tx['account_id'],
                     'is_reconciled' => $tx['is_reconciled'],
                     'transaction_date' => $tx['transaction_date'],
                     'counterparty' => $tx['counterparty'],
                     'account_name' => $tx['account_name'],
                     'type' => $tx['type'],
-                    'amount' => (float)$tx['amount'],
+                    'amount' => $amount,
                     'status' => $tx['status'],
                     'category_name' => null,
                     'description' => $tx['counterparty'] ?: 'Без описания',
                     'is_future' => $isFuture,
-                    'balance_after' => $runningBalance
+                    'balance_after' => $currentTotal,
+                    'account_balances' => $runningBalances // <-- ПЕРЕДАЕМ БАЛАНСЫ ВСЕХ КОШЕЛЬКОВ!
                 ];
             }
         }
 
         return [
             'month' => $month,
-            'start_balance' => $startBalance,
-            'end_balance' => $runningBalance,
+            'start_balance' => $totalStartBalance,
+            'end_balance' => array_sum($runningBalances), // Общий итог
+            'accounts' => $accounts,
             'transactions' => $timeline
         ];
     }

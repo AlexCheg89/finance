@@ -143,7 +143,26 @@ export class BudgetView {
                                 </div>
                                 <div class="col-right ${planColor}">${planAmount}</div>
                                 <div class="col-right ${factColor}">${factAmount}</div>
-                                <div class="col-right ${balanceClass}">${formatMoney(tx.balance_after, 'RUB')}</div>
+                                <div class="col-right ${balanceClass}">
+                                    ${tx.account_balances ? `
+                                        <div class="balance-tooltip">
+                                            ${formatMoney(tx.balance_after, 'RUB')}
+                                            <div class="tooltip-content">
+                                                <strong>Балансы кошельков:</strong><br>
+                                                ${Object.entries(tx.account_balances).map(([accId, bal]) => {
+                                                    // Находим название счета
+                                                    const account = b.accounts.find(a => a.id == accId);
+                                                    const accName = account ? account.name : 'Счет #' + accId;
+                                                    const color = bal < 0 ? 'color: var(--danger);' : '';
+                                                    return `<div style="display:flex; justify-content:space-between; margin-top:4px;">
+                                                        <span>${accName}:</span>
+                                                        <span style="${color} margin-left: 10px;">${formatMoney(bal, 'RUB')}</span>
+                                                    </div>`;
+                                                }).join('')}
+                                            </div>
+                                        </div>
+                                    ` : formatMoney(tx.balance_after, 'RUB')}
+                                </div>
                                 <div class="col-center">${reconciledHTML}</div>
                             </div>
                         `;

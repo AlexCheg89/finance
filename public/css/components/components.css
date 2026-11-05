@@ -141,3 +141,50 @@ input:focus, select:focus {
 .text-expense { color: var(--danger); }
 .text-balance-negative { color: var(--danger); font-weight: 600; }
 .text-balance-normal { color: var(--text-main); font-weight: 600; }
+
+/* Тултип для баланса */
+.balance-tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+    border-bottom: 1px dashed var(--text-muted); /* Пунктир, намекающий на интерактивность */
+}
+
+.balance-tooltip .tooltip-content {
+    visibility: hidden;
+    width: max-content;
+    min-width: 200px;
+    background-color: #fff;
+    color: var(--text-main);
+    text-align: left;
+    border-radius: 8px;
+    padding: 10px;
+    position: absolute;
+    z-index: 10;
+    bottom: 125%; /* Позиционируем над текстом */
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+    border: 1px solid rgba(0,0,0,0.1);
+    font-size: 0.9em;
+    font-weight: normal;
+}
+
+.balance-tooltip:hover .tooltip-content {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Стрелочка вниз у тултипа */
+.balance-tooltip .tooltip-content::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #fff transparent transparent transparent;
+}
