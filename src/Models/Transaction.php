@@ -76,8 +76,8 @@ class Transaction extends Model {
                 'uid' => $userId, 'acc' => $data['account_id'], 'type' => $data['type'],
                 'amount' => $data['amount'], 'counterparty' => $data['counterparty'], 
                 'date' => $data['transaction_date'],
-                'has_details' => $data['has_details'] ?? 1, 'status' => $data['status'] ?? 'actual', 
-                'is_regular' => $data['is_regular'] ?? 0
+                'has_details' => !empty($data['has_details']) ? (int)$data['has_details'] : 0, 'status' => $data['status'] ?? 'actual', 
+                'is_regular' => !empty($data['is_regular']) ? (int)$data['is_regular'] : 0
             ]);
             
             $transactionId = $pdo->lastInsertId();
@@ -221,5 +221,23 @@ class Transaction extends Model {
         ");
         $stmt->execute(['uid' => $userId]);
         return $stmt->fetchAll();
+    }
+
+    // Обновить позицию (товар) в чеке
+    public static function updateItem(int $itemId, array $itemData): void {
+        $instance = new static();
+        $stmt = $instance->db->prepare("
+            UPDATE transaction_items 
+            SET name = :name, category_id = :cat, quantity = :qty, unit_price = :price, total_price = :total 
+            WHERE id = :id
+        ");
+        $stmt->execute([
+            'name' => $itemData['name'],
+            'cat' => $itemData['category_id'] ?? null,
+            'qty' => $itemData['quantity'],
+            'price' => $itemData['unit_price'],
+            'total' => $itemData['total_price'] ?? ($itemData['unit_price'] * $itemData['quantity']),
+            'id' => $itemId
+        ]);
     }
 }

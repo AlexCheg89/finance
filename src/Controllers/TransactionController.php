@@ -6,7 +6,6 @@ use App\Response;
 
 class TransactionController extends Controller {
 
-    // Проверка прав: админ может всё, обычный юзер - только не сверенное
     private function canEdit(array $user, array $tx): bool {
         if ($user['role'] === 'admin') return true;
         return (int)$tx['is_reconciled'] === 0;
@@ -21,9 +20,7 @@ class TransactionController extends Controller {
     public function show(array $params): void {
         $user = $this->requireAuth();
         $transaction = Transaction::findWithItems((int)$params['id'], $user['id']);
-        
         if (!$transaction) Response::error('Транзакция не найдена', 404);
-        
         $this->success(['transaction' => $transaction]);
     }
 
@@ -35,7 +32,6 @@ class TransactionController extends Controller {
             Response::error('Укажите счет и сумму больше нуля', 400);
         }
 
-        // Форматируем дату
         $data['transaction_date'] = ($data['transaction_date'] ?? date('Y-m-d')) . ' ' . ($data['transaction_time'] ?? date('H:i:s'));
 
         try {
@@ -56,14 +52,12 @@ class TransactionController extends Controller {
 
         $data = json_decode(file_get_contents('php://input'), true);
         
-        // Обработка только флага has_details (переключатель детализации)
         if (isset($data['has_details']) && count($data) === 1) {
             Transaction::toggleDetails($id, (bool)$data['has_details'], (float)$tx['amount']);
             $this->success();
             return;
         }
 
-        // Полное обновление (включая смену статуса)
         try {
             Transaction::updateTransaction($id, $data, $user['id']);
             $this->success();
@@ -80,7 +74,6 @@ class TransactionController extends Controller {
         if (!$tx || $tx['user_id'] !== $user['id']) Response::error('Транзакция не найдена', 404);
         if (!$this->canEdit($user, $tx)) Response::error('Транзакция сверена', 403);
 
-        // Проверка остатка (бизнес-логика контроллера)
         $items = Transaction::findWithItems($txId, $user['id'])['items'];
         $currentSum = array_sum(array_column($items, 'total_price'));
         $remaining = (float)$tx['amount'] - $currentSum;
@@ -96,11 +89,35 @@ class TransactionController extends Controller {
         $this->success(['id' => $itemId], 201);
     }
 
+    public function updateItem(array $params): void {
+        $user = $this->requireAuth();
+        $itemId = (int)$params['itemId'];
+        $pdo = \App\Database::getConnection();
+
+        $stmt = $pdo->prepare("SELECT ti.*, t.user_id, t.amount as tx_amount, t.is_reconciled FROM transaction_items ti JOIN transactions t ON ti.transaction_id = t.id WHERE ti.id = :item_id");
+        $stmt->execute(['item_id' => $itemId]);
+        $item = $stmt->fetch();
+
+        if (!$item || $item['user_id'] !== $user['id']) Response::error('Позиция не найдена', 404);
+        if (!$this->canEdit($user, $item)) Response::error('Транзакция сверена', 403);
+
+        $data = json_decode(file_get_contents('php://input'), true);
+        $totalPrice = ($data['unit_price'] ?? 0) * ($data['quantity'] ?? 1);
+
+        $stmtSum = $pdo->prepare("SELECT COALESCE(SUM(total_price), 0) as current_sum FROM transaction_items WHERE transaction_id = :tid AND id != :item_id");
+        $stmtSum->execute(['tid' => $item['transaction_id'], 'item_id' => $itemId]);
+        $currentSum = (float)$stmtSum->fetch()['current_sum'];
+
+        $remaining = (float)$item['tx_amount'] - $currentSum;
+        if ($totalPrice > $remaining + 0.01) Response::error("Сумма превышает остаток (" . number_format($remaining, 2) . " руб.)", 400);
+
+        Transaction::updateItem($itemId, $data);
+        $this->success();
+    }
+
     public function deleteItem(array $params): void {
         $user = $this->requireAuth();
         $itemId = (int)$params['itemId'];
-        
-        // (В реальном проекте здесь нужна проверка, что item принадлежит юзеру)
         Transaction::deleteItem($itemId);
         $this->success();
     }
@@ -109,10 +126,8 @@ class TransactionController extends Controller {
         $user = $this->requireAuth();
         $id = (int)$params['id'];
         $pdo = \App\Database::getConnection();
-        
         $stmt = $pdo->prepare("UPDATE transactions SET is_reconciled = TRUE WHERE id = :id AND user_id = :uid");
         $stmt->execute(['id' => $id, 'uid' => $user['id']]);
-        
         $this->success();
     }
 
