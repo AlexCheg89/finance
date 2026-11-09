@@ -14,7 +14,7 @@ export class TransactionDetailView {
         try {
             const [txRes, catRes] = await Promise.all([
                 api.get(`/transactions/${txId}`),
-                api.get('/categories')
+                api.get('/categories/tree')
             ]);
             this.tx = txRes.transaction;
             this.categories = catRes.categories;
@@ -129,7 +129,15 @@ export class TransactionDetailView {
                                     <input type="number" id="item-price" placeholder="Цена" step="0.01" required style="flex: 1;">
                                     <input type="number" id="item-qty" placeholder="Кол-во" step="1" value="1" required style="flex: 1;">
                                 </div>
-                                <select id="item-category"><option value="">Без категории</option>${catOptions}</select>
+                                <div style="display: flex; gap: 10px;">
+                                    <select id="item-cat-parent" style="flex: 1;">
+                                        <option value="">Без категории</option>
+                                        ${this.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                                    </select>
+                                    <select id="item-cat-child" style="flex: 1;">
+                                        <option value="">-- Подкатегория --</option>
+                                    </select>
+                                </div>
                                 <button type="submit" style="margin-top: 10px; width: 100%;">Добавить</button>
                             </form>
                         </div>
@@ -189,6 +197,25 @@ export class TransactionDetailView {
                     this.render(container);
                 } catch (err) {
                     showErrorModal(err.message);
+                }
+            });
+        }
+
+        const catParentSelect = document.getElementById('item-cat-parent');
+        const catChildSelect = document.getElementById('item-cat-child');
+
+        if (catParentSelect) {
+            catParentSelect.addEventListener('change', (e) => {
+                const parentId = parseInt(e.target.value);
+                const parentCat = this.categories.find(c => c.id === parentId);
+                
+                // Очищаем подкатегории
+                catChildSelect.innerHTML = '<option value="">-- Подкатегория --</option>';
+                
+                if (parentCat && parentCat.children && parentCat.children.length > 0) {
+                    parentCat.children.forEach(child => {
+                        catChildSelect.innerHTML += `<option value="${child.id}">${child.name}</option>`;
+                    });
                 }
             });
         }
@@ -257,13 +284,16 @@ export class TransactionDetailView {
 
     async handleAddItem(e, container) {
         e.preventDefault();
+        const parentId = document.getElementById('item-cat-parent').value;
+        const childId = document.getElementById('item-cat-child').value;
+        const finalCategoryId = childId ? childId : parentId;
         try {
             await api.post(`/transactions/${this.tx.id}/items`, {
                 name: document.getElementById('item-name').value,
                 unit_price: parseFloat(document.getElementById('item-price').value),
                 quantity: parseFloat(document.getElementById('item-qty').value),
                 total_price: parseFloat(document.getElementById('item-price').value) * parseFloat(document.getElementById('item-qty').value),
-                category_id: document.getElementById('item-category').value || null
+                category_id: finalCategoryId || null
             });
             const res = await api.get(`/transactions/${this.tx.id}`);
             this.tx = res.transaction;

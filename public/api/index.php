@@ -43,6 +43,7 @@ $router->add('POST', '/api/accounts/{id}/recalculate-balance', function($p) { (n
 
 // Categories
 $router->add('GET', '/api/categories', function() { (new CategoryController())->index(); });
+$router->add('GET', '/api/categories/tree', function() { (new CategoryController())->tree(); });
 
 // Transactions
 $router->add('GET',  '/api/transactions', function() { (new TransactionController())->index(); });
