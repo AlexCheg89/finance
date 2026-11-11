@@ -11,8 +11,7 @@ class Category extends Model {
         $sql ="
             SELECT id, name, type, parent_id 
             FROM categories 
-            WHERE (user_id IS NULL OR user_id = :uid) 
-            ORDER BY name ASC
+            WHERE (user_id IS NULL OR user_id = :uid)
         ";
 
         $params = ['uid' => $userId];

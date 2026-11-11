@@ -40,11 +40,6 @@ export class TransactionDetailView {
         const userRole = store.state.user?.role || 'user';
         const canEdit = userRole === 'admin' || !isReconciled;
 
-        const catOptions = this.categories
-            .filter(c => c.parent_id === null)
-            .map(c => `<option value="${c.id}">${c.name}</option>`)
-            .join('');
-
         // Блок "Осталось разобрать" показываем только для расходов, если детализация включена и не разобрано
         const remainingHTML = (isExpense && hasDetails && !isFullyParsed) ? `
             <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 1.2em;">
@@ -54,6 +49,12 @@ export class TransactionDetailView {
         ` : '';
 
         const reconciledHTML = isReconciled ? `<span style="color:var(--success); margin-left: 10px; font-size: 1.2em;" title="Сверено">&#10004;</span>` : '';
+
+        // Фильтруем категрии для формы (по типу транзакции)
+        const filteredCatsForAdd = this.categories.filter(c => c.type === tx.type && c.parent_id === null);
+        const catParentOptions = filteredCatsForAdd.map(c =>
+            `<option value="${c.id}">${c.name}</option>`
+        ).join('');
 
         container.innerHTML = `
             <div class="dashboard">
@@ -132,7 +133,7 @@ export class TransactionDetailView {
                                 <div style="display: flex; gap: 10px;">
                                     <select id="item-cat-parent" style="flex: 1;">
                                         <option value="">Без категории</option>
-                                        ${this.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                                        ${catParentOptions}
                                     </select>
                                     <select id="item-cat-child" style="flex: 1;">
                                         <option value="">-- Подкатегория --</option>
@@ -171,52 +172,51 @@ export class TransactionDetailView {
                 detailsToggle.addEventListener('change', (e) => this.handleToggleDetails(e.target.checked, container));
             }
 
+            const toggleStatusBtn = document.getElementById('toggle-status-btn');
+            if (toggleStatusBtn) {
+                toggleStatusBtn.addEventListener('click', async () => {
+                    const newStatus = tx.status === 'planned' ? 'actual' : 'planned';
+                    try {
+                        await api.put(`/transactions/${tx.id}`, { 
+                            amount: tx.amount, 
+                            counterparty: tx.counterparty, 
+                            transaction_date: tx.transaction_date.split(' ')[0],
+                            transaction_time: tx.transaction_date.split(' ')[1] || '12:00',
+                            status: newStatus 
+                        });
+                        showStatus('Статус изменен', 'success');
+                        const res = await api.get(`/transactions/${tx.id}`);
+                        this.tx = res.transaction;
+                        this.render(container);
+                    } catch (err) {
+                        showErrorModal(err.message);
+                    }
+                });
+            }
+
+            // Связь категорий в форме добавления позиции
+            const catParentSelect = document.getElementById('item-cat-parent');
+            const catChildSelect = document.getElementById('item-cat-child');
+            if (catParentSelect) {
+                catParentSelect.addEventListener('change', (e) => {
+                    const parentId = parseInt(e.target.value);
+                    const parentCat = this.categories.find(c => c.id === parentId);
+
+                    catChildSelect.innerHTML = '<option value="">-- Подкатегория --</option>';
+                    if (parentCat && parentCat.children && parentCat.children.length > 0) {
+                        parentCat.children.forEach(child => {
+                            catChildSelect.innerHTML += `<option value="${child.id}">${child.name}</option>`;
+                        });
+                    }
+                });
+            }
+
             document.querySelectorAll('.delete-item-btn').forEach(btn => {
                 btn.addEventListener('click', () => this.handleDeleteItem(btn.dataset.id, container));
             });
 
             document.querySelectorAll('.edit-item-btn').forEach(btn => {
                 btn.addEventListener('click', () => this.openEditItemModal(btn.dataset, container));
-            });
-        }
-        const toggleStatusBtn = document.getElementById('toggle-status-btn');
-        if (toggleStatusBtn) {
-            toggleStatusBtn.addEventListener('click', async () => {
-                const newStatus = tx.status === 'planned' ? 'actual' : 'planned';
-                try {
-                    await api.put(`/transactions/${tx.id}`, { 
-                        amount: tx.amount, 
-                        counterparty: tx.counterparty, 
-                        transaction_date: tx.transaction_date.split(' ')[0],
-                        transaction_time: tx.transaction_date.split(' ')[1] || '12:00',
-                        status: newStatus 
-                    });
-                    showStatus('Статус изменен', 'success');
-                    const res = await api.get(`/transactions/${tx.id}`);
-                    this.tx = res.transaction;
-                    this.render(container);
-                } catch (err) {
-                    showErrorModal(err.message);
-                }
-            });
-        }
-
-        const catParentSelect = document.getElementById('item-cat-parent');
-        const catChildSelect = document.getElementById('item-cat-child');
-
-        if (catParentSelect) {
-            catParentSelect.addEventListener('change', (e) => {
-                const parentId = parseInt(e.target.value);
-                const parentCat = this.categories.find(c => c.id === parentId);
-                
-                // Очищаем подкатегории
-                catChildSelect.innerHTML = '<option value="">-- Подкатегория --</option>';
-                
-                if (parentCat && parentCat.children && parentCat.children.length > 0) {
-                    parentCat.children.forEach(child => {
-                        catChildSelect.innerHTML += `<option value="${child.id}">${child.name}</option>`;
-                    });
-                }
             });
         }
     }
@@ -241,6 +241,7 @@ export class TransactionDetailView {
         }
     }
 
+    // Оставляем для обеспечения совместимости
     async switchToSingleCategory(container) {
         if (!confirm('Удалить все текущие позиции и назначить одну общую категорию на всю сумму?')) {
             document.getElementById('tx-details-toggle').checked = true;
@@ -316,8 +317,27 @@ export class TransactionDetailView {
         const dateStr = dateObj.toISOString().split('T')[0];
         const timeStr = dateObj.toTimeString().slice(0, 5);
 
+        // Загружаем счета
+        let accounts = store.state.accounts;
+        if (!accounts || accounts.length === 0) {
+            api.get('/accounts').then(res => {
+                accounts = res.accounts;
+                store.set('accounts', accounts);
+            });
+        }
+
+        // Если счета еще не загрузились, показываем текущий
+        const accountOptions = accounts ? accounts.map(acc =>
+            `<option value="${acc.id}" ${tx.account_id === acc.id ? 'selected' : ''}>${acc.name}</option>`
+        ).join('') : `<option value="${tx.account_id}">${tx.account_name}</option>`;
+
         const modal = new Modal('Редактировать операцию', `
             <form id="edit-tx-form">
+                <label class="col-muted" style="font-size: 0.85em;">Счет</label>
+                <select id="edit-account">
+                    ${accountOptions}
+                </select>
+
                 <label class="col-muted" style="font-size: 0.85em;">Статус</label>
                 <select id="edit-status">
                     <option value="actual" ${tx.status === 'actual' ? 'selected' : ''}>Факт (деньги ушли)</option>
@@ -350,6 +370,7 @@ export class TransactionDetailView {
             e.preventDefault();
             try {
                 await api.put(`/transactions/${tx.id}`, {
+                    account_id: parseInt(document.getElementById('edit-account').value),
                     amount: parseFloat(document.getElementById('edit-amount').value),
                     counterparty: document.getElementById('edit-counterparty').value,
                     transaction_date: document.getElementById('edit-date').value,
@@ -357,7 +378,7 @@ export class TransactionDetailView {
                     status: document.getElementById('edit-status').value
                 });
                 modal.close();
-                showStatus('Редактировать позицию', 'success');
+                showStatus('Операция обновлена', 'success');
                 const res = await api.get(`/transactions/${tx.id}`);
                 this.tx = res.transaction;
                 this.render(container);
@@ -366,22 +387,89 @@ export class TransactionDetailView {
     }
 
     openEditItemModal(itemData, container) {
-        const catOptions = this.categories.filter(c => c.parent_id === null).map(c => 
-            `<option value="${c.id}" ${parseInt(itemData.cat) === c.id ? 'selected' : ''}>${c.name}</option>`
-        ).join('');
+        // Фильтруем категории по типу транзакции и оставляем только родителей
+        const filteredCats = this.categories.filter(c => c.type === this.tx.type && c.parentId === null);
+
+        const catOptions = filteredCats.map(c => {
+            const isSelected = parseInt(itemData.cat) === c.id;
+            return `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${c.name}</option>`
+        }).join('');
 
         const modal = new Modal('Редактировать позицию', `
             <form id="edit-item-form">
+                <label class="col-muted" style="font-size: 0.85em;">Название</label>
                 <input type="text" id="edit-item-name" value="${itemData.name}" required>
+
                 <div style="display: flex; gap: 10px;">
-                    <input type="number" id="edit-item-price" value="${itemData.price}" step="0.01" required style="flex: 1;">
-                    <input type="number" id="edit-item-qty" value="${itemData.qty}" step="1" required style="flex: 1;">
+                    <div style="flex: 1;>
+                        <label class="col-muted" style="font-size: 0.85em;">Цена</label>
+                        <input type="number" id="edit-item-price" value="${itemData.price}" step="0.01" required style="margin-bottom: 0;">
+                    </div>
+                    <div style="flex: 1;>
+                        <label class="col-muted" style="font-size: 0.85em;">Кол-во</label>
+                        <input type="number" id="edit-item-qty" value="${itemData.qty}" step="1" required style="margin-bottom: 0;">
+                    </div>
                 </div>
-                <select id="edit-item-category"><option value="">Без категории</option>${catOptions}</select>
+
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <div style="flex: 1;">
+                        <label class="col-muted" style="font-size: 0.85em;">Категория</label>
+                        <select id="edit-item-cat-parent" style="margin-bottom: 0;">
+                            <option value="">Без категории</option>
+                            ${catOptions}
+                        </select>
+                    </div>
+                    <div style="flex: 1;">
+                        <label class="col-muted" style="font-size: 0.85em;">Подкатегория</label>
+                        <select id="edit-item-cat-child">
+                            <option value="">-- Не выбрана --</option>
+                        </select>
+                    </div>
+                </div>
+
                 <button type="submit" style="margin-top: 10px; width: 100%;">Добавить</button>
             </form>
         `);
         modal.open();
+
+        // Логика связи категорий
+        const parentSelect = document.getElementById('edit-item-cat-parent');
+        const childSelect = document.getElementById('edit-item-cat-child');
+
+        const updateChildCategories = (parentId, selectedChildId = null) => {
+            childSelect.innerHTML = '<option value="">-- Не выбрана --</option>';
+            if (!parentId) return;
+
+            const parentCat = filteredCats.find(c => c.id === parseInt(parentId));
+            if (parentCat && parentCat.children && parentCat.children.length > 0) {
+                parentCat.children.forEach(child => {
+                    const isSelected = selectedChildId && parseInt(selectedChildId) === child.id;
+                    childSelect.innerHTML += `<option value="${child.id}" ${isSelected ? 'selected' : ''}>${child.name}</option>`;
+                });
+            }
+        };
+
+        // Предзаполнение, если категория уже выбрана
+        if (itemData.cat) {
+            const catId = parseInt(itemData.cat);
+            const isParent = filteredCats.some(c => c.id === catId);
+
+            if (isParent) {
+                updateChildCategories(catId);
+            } else {
+                for (const parent of filteredCats) {
+                    if (parent.children && parent.children.some(c => c.id === catId)) {
+                        parentSelect.value = parentId;
+                        updateChildCategories(parent.id, catId);
+                        breek;
+                    }                    
+                }
+            }
+        }
+
+        parentSelect.addEventListener('change', (e) => {
+            updateChildCategories(e.target.value);
+        });
 
         document.getElementById('edit-item-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -390,7 +478,7 @@ export class TransactionDetailView {
                     name: document.getElementById('edit-item-name').value,
                     unit_price: parseFloat(document.getElementById('edit-item-price').value),
                     quantity: parseFloat(document.getElementById('edit-item-qty').value),
-                    category_id: document.getElementById('edit-item-category').value || null
+                    category_id: finalCategoryId ? parseInt(finalCategoryId) : null
                 });
                 modal.close();
                 showStatus('Позиция обновлена', 'success');
@@ -402,10 +490,11 @@ export class TransactionDetailView {
     }
 
     openAssignCategoryModal(container) {
-        const catOptions = this.categories
-            .filter(c => c.parent_id === null)
-            .map(c => `<option value="${c.id}">${c.name}</option>`)
-            .join('');
+        const filteredCats = this.categories.filter(c => c.type === this.tx.type && c.parent_id === null);
+                
+        const catOptions = filteredCats.map(c => 
+            `<option value="${c.id}">${c.name}</option>`
+        ).join('');
 
         const modal = new Modal('Назначить категорию', `
             <form id="assign-category-form">

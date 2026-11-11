@@ -79,7 +79,7 @@ export class DashboardView {
         }
     }
 
-    async openAddTransactionModal() {
+        async openAddTransactionModal() {
         if (!store.state.accounts || store.state.accounts.length === 0) {
             showErrorModal('Сначала создайте хотя бы один счет!');
             return;
@@ -94,9 +94,7 @@ export class DashboardView {
         const today = now.toISOString().split('T')[0];
         const currentTime = now.toTimeString().slice(0, 5);
 
-        // Подгружаем категории
-        const catRes = await api.get('/categories');
-        const catOptions = catRes.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        // УБИРАЕМ отсюда загрузку catOptions. Мы будем делать это динамически.
 
         const formHTML = `
             <form id="quick-tx-form">
@@ -118,9 +116,15 @@ export class DashboardView {
                         <input type="checkbox" id="tx-has-details" style="width: auto; margin: 0;">
                         <label for="tx-has-details" style="font-size: 0.9em; cursor: pointer;">Будет детализация (позиции)</label>
                     </div>
+                    
                     <div id="single-category-container">
                         <label style="font-size: 0.8em; color: var(--text-muted);">Категория</label>
-                        <select id="tx-category"><option value="">Без категории</option>${catOptions}</select>
+                        <select id="tx-category-parent" style="margin-bottom: 5px;">
+                            <option value="">Без категории</option>
+                        </select>
+                        <select id="tx-category-child">
+                            <option value="">-- Подкатегория --</option>
+                        </select>
                     </div>
                 </div>
                 
@@ -131,22 +135,70 @@ export class DashboardView {
         const modal = new Modal('Новая операция', formHTML);
         modal.open();
 
-        // Переключение видимости категории
+        // --- ЛОГИКА КАТЕГОРИЙ ---
+        const typeSelect = document.getElementById('tx-type');
+        const parentSelect = document.getElementById('tx-category-parent');
+        const childSelect = document.getElementById('tx-category-child');
+
+        // Функция загрузки родительских категорий
+        const loadParentCategories = async () => {
+            const type = typeSelect.value;
+            const catRes = await api.get(`/categories/tree?type=${type}`);
+            const cats = catRes.categories;
+
+            parentSelect.innerHTML = '<option value="">Без категории</option>';
+            childSelect.innerHTML = '<option value="">-- Подкатегория --</option>';
+            
+            cats.forEach(c => {
+                parentSelect.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+            });
+        };
+
+        // Обработчик смены типа (Расход/Доход)
+        typeSelect.addEventListener('change', loadParentCategories);
+
+        // Обработчик выбора родителя (загружаем подкатегории)
+        parentSelect.addEventListener('change', async (e) => {
+            const parentId = parseInt(e.target.value);
+            const type = typeSelect.value;
+            
+            childSelect.innerHTML = '<option value="">-- Подкатегория --</option>';
+            
+            if (parentId) {
+                const catRes = await api.get(`/categories/tree?type=${type}`);
+                const parentCat = catRes.categories.find(c => c.id === parentId);
+                
+                if (parentCat && parentCat.children) {
+                    parentCat.children.forEach(child => {
+                        childSelect.innerHTML += `<option value="${child.id}">${child.name}</option>`;
+                    });
+                }
+            }
+        });
+
+        // Переключение видимости блока категорий
         document.getElementById('tx-has-details').addEventListener('change', (e) => {
             document.getElementById('single-category-container').style.display = e.target.checked ? 'none' : 'block';
         });
 
+        // Первичная загрузка категорий
+        await loadParentCategories();
+
+        // --- ОТПРАВКА ФОРМЫ ---
         document.getElementById('quick-tx-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const selectedAccount = document.getElementById('tx-account').value;
             const hasDetails = document.getElementById('tx-has-details').checked;
-            const catId = document.getElementById('tx-category').value;
+            
+            const parentCatId = document.getElementById('tx-category-parent').value;
+            const childCatId = document.getElementById('tx-category-child').value;
+            const finalCategoryId = childCatId ? childCatId : parentCatId;
+            
             const amountVal = parseFloat(document.getElementById('tx-amount').value);
 
-            // Если детализации нет, но категория выбрана — создаем одну позицию
-            const items = (!hasDetails && catId) ? [{
+            const items = (!hasDetails && finalCategoryId) ? [{
                 name: 'Основная сумма',
-                category_id: parseInt(catId),
+                category_id: parseInt(finalCategoryId),
                 quantity: 1,
                 unit_price: amountVal,
                 total_price: amountVal
@@ -160,7 +212,8 @@ export class DashboardView {
                 transaction_date: document.getElementById('tx-date').value,
                 transaction_time: document.getElementById('tx-time').value,
                 items: items,
-                has_details: hasDetails // <-- Передаем флаг
+                has_details: hasDetails ? 1 : 0,
+                status: 'actual'
             };
 
             try {
