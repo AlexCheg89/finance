@@ -387,30 +387,31 @@ export class TransactionDetailView {
     }
 
     openEditItemModal(itemData, container) {
-        // Фильтруем категории по типу транзакции и оставляем только родителей
-        const filteredCats = this.categories.filter(c => c.type === this.tx.type && c.parentId === null);
+        // 1. Фильтруем категории: берем только нужный тип (расход/доход) и только родителей
+        const filteredCats = this.categories.filter(c => c.type === this.tx.type && c.parent_id === null);
 
+        // 2. Формируем список для родительского селекта
         const catOptions = filteredCats.map(c => {
             const isSelected = parseInt(itemData.cat) === c.id;
-            return `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${c.name}</option>`
+            return `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${c.name}</option>`;
         }).join('');
 
-        const modal = new Modal('Редактировать позицию', `
+         const modal = new Modal('Редактировать позицию', `
             <form id="edit-item-form">
                 <label class="col-muted" style="font-size: 0.85em;">Название</label>
                 <input type="text" id="edit-item-name" value="${itemData.name}" required>
-
+                
                 <div style="display: flex; gap: 10px;">
-                    <div style="flex: 1;>
+                    <div style="flex: 1;">
                         <label class="col-muted" style="font-size: 0.85em;">Цена</label>
                         <input type="number" id="edit-item-price" value="${itemData.price}" step="0.01" required style="margin-bottom: 0;">
                     </div>
-                    <div style="flex: 1;>
+                    <div style="flex: 1;">
                         <label class="col-muted" style="font-size: 0.85em;">Кол-во</label>
                         <input type="number" id="edit-item-qty" value="${itemData.qty}" step="1" required style="margin-bottom: 0;">
                     </div>
                 </div>
-
+                
                 <div style="display: flex; gap: 10px; margin-top: 10px;">
                     <div style="flex: 1;">
                         <label class="col-muted" style="font-size: 0.85em;">Категория</label>
@@ -421,13 +422,13 @@ export class TransactionDetailView {
                     </div>
                     <div style="flex: 1;">
                         <label class="col-muted" style="font-size: 0.85em;">Подкатегория</label>
-                        <select id="edit-item-cat-child">
+                        <select id="edit-item-cat-child" style="margin-bottom: 0;">
                             <option value="">-- Не выбрана --</option>
                         </select>
                     </div>
                 </div>
-
-                <button type="submit" style="margin-top: 10px; width: 100%;">Добавить</button>
+                
+                <button type="submit" style="margin-top: 15px; width: 100%;">Сохранить</button>
             </form>
         `);
         modal.open();
@@ -436,11 +437,14 @@ export class TransactionDetailView {
         const parentSelect = document.getElementById('edit-item-cat-parent');
         const childSelect = document.getElementById('edit-item-cat-child');
 
+        // Функция заполнения подкатегорий
         const updateChildCategories = (parentId, selectedChildId = null) => {
             childSelect.innerHTML = '<option value="">-- Не выбрана --</option>';
             if (!parentId) return;
 
+            // Ищем выбранного родителя в отфильтрованном списке
             const parentCat = filteredCats.find(c => c.id === parseInt(parentId));
+            
             if (parentCat && parentCat.children && parentCat.children.length > 0) {
                 parentCat.children.forEach(child => {
                     const isSelected = selectedChildId && parseInt(selectedChildId) === child.id;
@@ -449,30 +453,39 @@ export class TransactionDetailView {
             }
         };
 
-        // Предзаполнение, если категория уже выбрана
+        // Если у позиции уже есть категория, нужно понять: это родитель или подкатегория?
         if (itemData.cat) {
             const catId = parseInt(itemData.cat);
             const isParent = filteredCats.some(c => c.id === catId);
-
+            
             if (isParent) {
+                // Если это родитель, просто загружаем его детей
                 updateChildCategories(catId);
             } else {
+                // Если это подкатегория, нужно найти её родителя
                 for (const parent of filteredCats) {
                     if (parent.children && parent.children.some(c => c.id === catId)) {
-                        parentSelect.value = parentId;
+                        parentSelect.value = parent.id;
                         updateChildCategories(parent.id, catId);
-                        breek;
-                    }                    
+                        break;
+                    }
                 }
             }
         }
 
+        // Обработчик смены родителя
         parentSelect.addEventListener('change', (e) => {
             updateChildCategories(e.target.value);
         });
 
+        // --- Отправка формы ---
         document.getElementById('edit-item-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+            
+            const parentCatId = document.getElementById('edit-item-cat-parent').value;
+            const childCatId = document.getElementById('edit-item-cat-child').value;
+            const finalCategoryId = childCatId ? childCatId : parentCatId;
+
             try {
                 await api.put(`/transactions/items/${itemData.id}`, {
                     name: document.getElementById('edit-item-name').value,
