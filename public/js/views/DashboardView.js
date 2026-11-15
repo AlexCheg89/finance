@@ -63,7 +63,7 @@ export class DashboardView {
             const total = accRes.accounts.reduce((sum, acc) => sum + parseFloat(acc.balance), 0);
             document.getElementById('total-balance').textContent = formatMoney(total, 'RUB');
 
-            const txRes = await api.get('/transactions');
+            const txRes = await api.get('/transactions?status=actual');
             const recent = txRes.transactions.slice(0, 5);
             const txContainer = document.getElementById('recent-transactions');
             txContainer.innerHTML = '';

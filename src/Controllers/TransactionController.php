@@ -13,7 +13,12 @@ class TransactionController extends Controller {
 
     public function index(): void {
         $user = $this->requireAuth();
-        $transactions = Transaction::getByUser($user['id']);
+
+        $month = $_GET['month'] ?? null;
+        $accountId = isset($_GET['account_id']) ? (int)$_GET['account_id'] : null;
+        $status = $_GET['status'] ?? null;
+
+        $transactions = Transaction::getFiltered($user['id'], $month, $accountId, $status);
         $this->success(['transactions' => $transactions]);
     }
 

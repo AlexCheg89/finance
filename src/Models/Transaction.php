@@ -256,4 +256,64 @@ class Transaction extends Model {
             'id' => $itemId
         ]);
     }
+
+    // Работа с фильтрами
+    public static function getFiltered(int $userId, ?string $month = null, ?int $accountId = null, string $status = null): array {
+        $instance = new static();
+        
+        $sql = "
+            SELECT t.*, a.name as account_name 
+            FROM transactions t
+            JOIN accounts a ON t.account_id = a.id
+            WHERE t.user_id = :uid
+        ";
+        $params = ['uid' => $userId];
+        
+        if ($month) {
+            $sql .= " AND t.transaction_date >= :start AND t.transaction_date <= :end";
+            $params['start'] = $month . '-01 00:00:00';
+            $params['end'] = date('Y-m-t', strtotime($month . '-01')) . ' 23:59:59';
+        }
+
+        if ($accountId) {
+            $sql .= " AND t.account_id = :acc_id";
+            $params['acc_id'] = $accountId;
+        }
+
+        if ($status) {
+            $sql .= " AND t.status = :status";
+            $params['status'] = $status;
+        }
+
+        $sql .= " ORDER BY t.transaction_date DESC, t.id DESC LIMIT 100";
+
+        $stmt = $instance->db->prepare($sql);
+        $stmt->execute($params);
+        $transactions = $stmt->fetchAll();
+
+        if (empty($transactions)) return [];
+
+        // Подтягиваем позиции
+        $txIds = array_column($transactions, 'id');
+        $inQuery = implode(',', array_fill(0, count($txIds), '?'));
+        $stmtItems = $instance->db->prepare("
+            SELECT ti.*, c.name as category_name 
+            FROM transaction_items ti
+            LEFT JOIN categories c ON ti.category_id = c.id
+            WHERE ti.transaction_id IN ($inQuery)
+        ");
+        $stmtItems->execute($txIds);
+        $items = $stmtItems->fetchAll();
+
+        $itemsByTx = [];
+        foreach ($items as $item) {
+            $itemsByTx[$item['transaction_id']][] = $item;
+        }
+        foreach ($transactions as &$tx) {
+            $tx['items'] = $itemsByTx[$tx['id']] ?? [];
+        }
+
+        return $transactions;
+    }
+
 }
