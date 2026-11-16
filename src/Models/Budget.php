@@ -2,6 +2,7 @@
 namespace App\Models;
 
 use App\Database;
+use PDO;
 
 class Budget {
     
@@ -10,37 +11,45 @@ class Budget {
         
         $startDate = $month . '-01';
         $endDate = date('Y-m-t', strtotime($startDate));
+
+        // Предыдущий месяц
         $prevMonthDate = date('Y-m', strtotime($startDate . ' -1 month'));
 
-        // 1. Получаем счета и их начальные балансы
-        $stmtAcc = $pdo->prepare("SELECT id, name, initial_balance FROM accounts WHERE user_id = :uid");
+        // 1. Пытаемся взять снимки за предыдущий месяц
+        $stmtSnap = $pdo->prepare("SELECT account_id, balance FROM monthly_snapshots WHERE user_id = :uid AND month = :month");
+        $stmtSnap->execute(['uid' => $userId, 'month' => $prevMonthDate]);
+        $snapshots = $stmtSnap->fetchAll(PDO::FETCH_KEY_PAIR);
+
+        // 2. Получаем список всех счетов
+        $stmtAcc = $pdo->prepare("SELECT id, name, balance, initial_balance, created_at FROM accounts WHERE user_id = :uid");
         $stmtAcc->execute(['uid' => $userId]);
         $accounts = $stmtAcc->fetchAll();
-        
-        // Если есть снимок прошлого месяца, берем общий баланс из него (пока не разбиваем снимок по кошелькам)
-        $stmtSnap = $pdo->prepare("SELECT total_balance FROM monthly_snapshots WHERE user_id = :uid AND month = :month");
-        $stmtSnap->execute(['uid' => $userId, 'month' => $prevMonthDate]);
-        $snapshot = $stmtSnap->fetch();
 
-        // Формируем стартовые балансы по кошелькам
         $runningBalances = [];
         $totalStartBalance = 0;
-        
-        // Пока для простоты берем initial_balance каждого счета. 
-        // В будущем, если будет снимок, нужно будет разбивать его по кошелькам.
+
         foreach ($accounts as $acc) {
-            $runningBalances[$acc['id']] = (float)$acc['initial_balance'];
-            $totalStartBalance += (float)$acc['initial_balance'];
+            // ПРОВЕРКА: Если кошелек создан позже начала запрашиваемого месяца, 
+            // то в этом месяце его баланс = 0 (он еще не существовал)
+            if (date('Y-m-d', strtotime($acc['created_at'])) > $startDate) {
+                $runningBalances[$acc['id']] = 0;
+                continue; 
+            }
+
+            // 1. Если есть снимок за прошлый месяц — берем его
+            if (isset($snapshots[$acc['id']])) {
+                $startBal = (float)$snapshots[$acc['id']];
+            } 
+            // 2. Если снимка нет — берем initial_balance
+            else {
+                $startBal = (float)$acc['initial_balance'];
+            }
+
+            $runningBalances[$acc['id']] = $startBal;
+            $totalStartBalance += $startBal;
         }
 
-        // Если есть снимок, используем его как общий стартовый (упрощение)
-        if ($snapshot) {
-            $totalStartBalance = (float)$snapshot['total_balance'];
-            // ВАЖНО: Это упрощение. Правильнее было бы хранить снимок по каждому кошельку.
-            // Но пока оставим так, чтобы не усложнять.
-        }
-
-        // 2. Получаем транзакции
+        // 3. Получаем транзакции за месяц
         $stmt = $pdo->prepare("
             SELECT t.*, a.name as account_name 
             FROM transactions t
@@ -83,7 +92,6 @@ class Budget {
                         $runningBalances[$tx['account_id']] -= $amount;
                     }
 
-                    // Считаем общий баланс на текущий момент
                     $currentTotal = array_sum($runningBalances);
 
                     $timeline[] = [
@@ -99,8 +107,8 @@ class Budget {
                         'category_name' => $item['category_name'] ?? null,
                         'description' => $item['name'],
                         'is_future' => $isFuture,
-                        'balance_after' => $currentTotal, // Общий баланс
-                        'account_balances' => $runningBalances // <-- ПЕРЕДАЕМ БАЛАНСЫ ВСЕХ КОШЕЛЬКОВ!
+                        'balance_after' => $currentTotal,
+                        'account_balances' => $runningBalances
                     ];
                 }
             } else {
@@ -127,7 +135,7 @@ class Budget {
                     'description' => $tx['counterparty'] ?: 'Без описания',
                     'is_future' => $isFuture,
                     'balance_after' => $currentTotal,
-                    'account_balances' => $runningBalances // <-- ПЕРЕДАЕМ БАЛАНСЫ ВСЕХ КОШЕЛЬКОВ!
+                    'account_balances' => $runningBalances
                 ];
             }
         }
@@ -135,8 +143,9 @@ class Budget {
         return [
             'month' => $month,
             'start_balance' => $totalStartBalance,
-            'end_balance' => array_sum($runningBalances), // Общий итог
+            'end_balance' => array_sum($runningBalances),
             'accounts' => $accounts,
+            'final_balances' => $runningBalances,
             'transactions' => $timeline
         ];
     }

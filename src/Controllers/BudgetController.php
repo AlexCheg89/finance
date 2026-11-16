@@ -3,6 +3,8 @@ namespace App\Controllers;
 
 use App\Models\Budget;
 use App\Database;
+use App\Response;
+use Exception;
 
 class BudgetController extends Controller {
     
@@ -21,19 +23,42 @@ class BudgetController extends Controller {
         $data = json_decode(file_get_contents('php://input'), true);
         $month = $data['month'] ?? date('Y-m');
 
-        // Получаем расчет на этот месяц, чтобы узнать конечный баланс
+        // 1. Получаем расчет на этот месяц (включая final_balances)
         $result = Budget::getTimeline($user['id'], $month);
-        $endBalance = $result['end_balance'];
+        
+        if (!isset($result['final_balances'])) {
+            Response::error('Ошибка: не удалось получить балансы для закрытия', 500);
+        }
 
-        // Сохраняем снимок
         $pdo = Database::getConnection();
-        $stmt = $pdo->prepare("
-            INSERT INTO monthly_snapshots (user_id, month, total_balance) 
-            VALUES (:uid, :month, :balance)
-            ON DUPLICATE KEY UPDATE total_balance = :balance
-        ");
-        $stmt->execute(['uid' => $user['id'], 'month' => $month, 'balance' => $endBalance]);
 
-        $this->success(['message' => "Месяц $month закрыт. Баланс: " . number_format($endBalance, 2)]);
+        try {
+            $pdo->beginTransaction();
+
+            // 2. Удаляем старые снимки за этот месяц (если закрываем повторно)
+            $stmtDel = $pdo->prepare("DELETE FROM monthly_snapshots WHERE user_id = :uid AND month = :month");
+            $stmtDel->execute(['uid' => $user['id'], 'month' => $month]);
+
+            // 3. Сохраняем новые снимки для каждого кошелька
+
+            $stmtIns = $pdo->prepare("
+                INSERT INTO monthly_snapshots (user_id, account_id, month, balance) 
+                VALUES (:uid, :acc, :month, :balance)
+            ");
+            foreach ($result['final_balances'] as $accountId => $balance) {
+                $stmtIns->execute([
+                    'uid' => $user['id'],
+                    'acc' => $accountId,
+                    'month' => $month,
+                    'balance' => $balance
+                ]);
+            }
+        
+            $pdo->commit();
+            $this->success(['message' => "Месяц $month успешно закрыт. Снимок балансов сохранен."]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            Response::error('Ошибка при закрытии месяца: ' . $e->getMessage(), 500);
+        }
     }
 }
