@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Models\Transaction;
 use App\Response;
+use App\Models\Obligation;
 
 class TransactionController extends Controller {
 
@@ -41,6 +42,17 @@ class TransactionController extends Controller {
 
         try {
             $id = Transaction::createFull($data, $user['id']);
+
+            // Если это доход запускаем создание обязательств
+            if ($data['type'] === 'income') {
+                // Передаем массив с явным временем
+                Obligation::createAutoDebts($user['id'], array_merge($data, [
+                    'id' => $id,
+                    'parsed_time' => $data['transaction_time'] ?? '12:00:00', // Явно передаем время
+                    'parsed_date' => $data['transaction_date'] ?? date('Y-m-d') // Явно передаем дату
+                ]));
+            }
+
             $this->success(['id' => $id], 201);
         } catch (\Exception $e) {
             Response::error('Ошибка при создании транзакции', 500);
