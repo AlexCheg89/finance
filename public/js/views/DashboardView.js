@@ -29,6 +29,7 @@ export class DashboardView {
                     <button id="go-transactions" style="background: #6c757d;">&#128220; Все транзакции</button>
                     <button id="btn-add-tx" style="background: var(--success);">&#10133; Добавить операцию</button>
                     <button id="go-budget" style="background: #007bff;">&#128200; Бюджет</button>
+                    <button id="go-reports" style="background: #17a2b8;">&#128200; Отчеты</button>
                 </div>
 
                 <h2>Общий баланс</h2>
@@ -48,10 +49,13 @@ export class DashboardView {
 
         document.getElementById('go-accounts').addEventListener('click', () => window.dispatchEvent(new CustomEvent('navigate', { detail: '/accounts' })));
         document.getElementById('go-transactions').addEventListener('click', () => window.dispatchEvent(new CustomEvent('navigate', { detail: '/transactions' })));
+        document.getElementById('go-reports').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('navigate', { detail: '/reports' }));
+        });
         document.getElementById('btn-add-tx').addEventListener('click', () => this.openAddTransactionModal());
         document.getElementById('go-budget').addEventListener('click', () => {
-        window.dispatchEvent(new CustomEvent('navigate', { detail: '/budget' }));
-});
+        window.dispatchEvent(new CustomEvent('navigate', { detail: '/budget' }));     
+    });
 
         await this.loadData();
     }

@@ -6,6 +6,7 @@ import { AccountView } from './views/AccountView.js';
 import { TransactionsView } from './views/TransactionsView.js';
 import { TransactionDetailView } from './views/TransactionDetailView.js';
 import { BudgetView } from './views/BudgetView.js';
+import { ReportsView } from './views/ReportsView.js';
 
 // Регистрируем маршруты
 router.add('/login', LoginView);
@@ -15,6 +16,7 @@ router.add('/account', AccountView);
 router.add('/transactions', TransactionsView);
 router.add('/transaction', TransactionDetailView);
 router.add('/budget', BudgetView);
+router.add('/reports', ReportsView);
 
 // Запускаем роутер
 router.init();

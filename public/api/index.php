@@ -22,6 +22,7 @@ use App\Controllers\AccountController;
 use App\Controllers\TransactionController;
 use App\Controllers\CategoryController;
 use App\Controllers\BudgetController;
+use App\Controllers\ReportController;
 
 Env::load(__DIR__ . '/../../.env');
 
@@ -63,5 +64,8 @@ $router->add('POST', '/api/transactions/{id}/reconcile', function($p) { (new Tra
 // BudgetView
 $router->add('GET', '/api/budget', function() { (new BudgetController())->index(); });
 $router->add('POST', '/api/budget/close-month', function() { (new BudgetController())->closeMonth(); });
+
+// Reports
+$router->add('GET', '/api/reports/summary', function() { (new ReportController())->summary(); });
 
 $router->dispatch($method, $uri);
