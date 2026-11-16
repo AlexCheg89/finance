@@ -25,6 +25,23 @@ class Budget {
         $stmtAcc->execute(['uid' => $userId]);
         $accounts = $stmtAcc->fetchAll();
 
+        // 2.1. Получаем сумму ВСЕХ транзакций до начала текущего месяца (и факт, и план)
+        // Это нужно для "виртуального закрытия" прошлых месяцев, если снимка нет
+        $stmtPastTx = $pdo->prepare("
+            SELECT account_id, 
+                   SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as past_income,
+                   SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as past_expense
+            FROM transactions 
+            WHERE user_id = :uid 
+            AND transaction_date < :start
+            GROUP BY account_id
+        ");
+        $stmtPastTx->execute([
+            'uid' => $userId,
+            'start' => $startDate . ' 00:00:00'
+        ]);
+        $pastSums = $stmtPastTx->fetchAll(PDO::FETCH_GROUP | PDO::FETCH_ASSOC);
+
         $runningBalances = [];
         $totalStartBalance = 0;
 
@@ -40,9 +57,16 @@ class Budget {
             if (isset($snapshots[$acc['id']])) {
                 $startBal = (float)$snapshots[$acc['id']];
             } 
-            // 2. Если снимка нет — берем initial_balance
+            // 2. Если снимка нет — восстанавливаем баланс
             else {
                 $startBal = (float)$acc['initial_balance'];
+                
+                // Прибавляем/вычитаем все транзакции, которые были ДО текущего месяца
+                if (isset($pastSums[$acc['id']])) {
+                    $pastIncome = (float)($pastSums[$acc['id']][0]['past_income'] ?? 0);
+                    $pastExpense = (float)($pastSums[$acc['id']][0]['past_expense'] ?? 0);
+                    $startBal = $startBal + $pastIncome - $pastExpense;
+                }
             }
 
             $runningBalances[$acc['id']] = $startBal;
