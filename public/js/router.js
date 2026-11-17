@@ -23,6 +23,9 @@ export const router = {
         if (path.startsWith('/transaction/')) {
             path = '/transaction';
         }
+        if (path.startsWith('/debt/')) {
+            path = '/debt';
+        }
 
         if (!this.routes[path]) {
             path = '/login';

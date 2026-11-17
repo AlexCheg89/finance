@@ -24,13 +24,48 @@ export class DebtsView {
             grouped[cat].push(d);
         });
 
+        // Считаем общую сумму долга и выплат
+        let totalDebt = 0;
+        let totalPaid = 0;
+
+        this.debts.forEach(debt => {
+            // Считаем только родительские долги, чтобы не дублировать (если они есть у детей)
+            // Или считаем все, если у детей свои суммы. У вас родитель = сумме детей.
+            // Будем считать только корневые долги (без parent_id)
+            if (!debt.parent_id) {
+                totalDebt += parseFloat(debt.total_amount);
+                totalPaid += parseFloat(debt.paid_amount);
+            }
+        });
+
+        const totalProgress = totalDebt > 0 ? (totalPaid / totalDebt) * 100 : 0;
+        const totalRemaining = totalDebt - totalPaid;
+
         let html = `
             <div class="dashboard" style="max-width: 1100px;">
                 <header>    
                     <h1>Долги и обязательства</h1>
                     <button id="back-btn" style="width:auto; padding: 5px 15px;">&#8592; Назад</button>
                 </header>
+
+                <!-- Блок общей задолженности -->
+                <div style="background: rgba(255,255,255,0.5); padding: 20px; border-radius: 12px; margin-bottom: 30px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h2>Общая задолженность</h2>
+                        <span style="font-size: 1.5em; font-weight: bold; color: var(--danger);">${formatMoney(totalRemaining, 'RUB')}</span>
+                    </div>
+                    
+                    <div style="background: rgba(0,0,0,0.1); border-radius: 10px; height: 20px; overflow: hidden; margin-bottom: 10px;">
+                        <div style="width: ${Math.min(totalProgress, 100)}%; height: 100%; background: var(--success);"></div>
+                    </div>
+                    
+                    <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: var(--text-muted);">
+                        <span>Выплачено: ${formatMoney(totalPaid, 'RUB')}</span>
+                        <span>Общая сумма долга: ${formatMoney(totalDebt, 'RUB')}</span>
+                    </div>
+                </div>
         `;
+
         for (const [catName, debts] of Object.entries(grouped)) {
             html += `<h2 style="margin-top: 20px; border-bottom: 2px solid var(--primary); padding-bottom: 5px;">${catName}</h2>`;
 
@@ -43,7 +78,7 @@ export class DebtsView {
                 const remaining = debt.total_amount - debt.paid_amount;
 
                 html += `
-                    <div class="account-card" style="margin-bottom: 15px; padding: 15px; cursor: default;">
+                    <div class="account-card debt-card" data-id="${debt.id}" style="margin-bottom: 15px; padding: 15px; cursor: pointer;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                             <strong>${debt.name}</strong>
                             <span style="font-weight: bold; color: ${remaining <= 0 ? 'var(--success)' : 'var(--text-main)'};">${formatMoney(debt.total_amount, 'RUB')}</span>
@@ -89,6 +124,13 @@ export class DebtsView {
     
         html += `</div>`;
         container.innerHTML = html;
+
+         document.querySelectorAll('.debt-card').forEach(card => {
+            card.addEventListener('click', () => {
+                const id = card.dataset.id;
+                window.dispatchEvent(new CustomEvent('navigate', { detail: `/debt/${id}` }));
+            });
+        });
 
         document.getElementById('back-btn').addEventListener('click', () => {
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/dashboard' }));

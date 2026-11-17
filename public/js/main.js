@@ -8,6 +8,7 @@ import { TransactionDetailView } from './views/TransactionDetailView.js';
 import { BudgetView } from './views/BudgetView.js';
 import { ReportsView } from './views/ReportsView.js';
 import { DebtsView } from './views/DebtsView.js';
+import { DebtDetailView } from './views/DebtDetailView.js';
 
 // Регистрируем маршруты
 router.add('/login', LoginView);
@@ -19,6 +20,7 @@ router.add('/transaction', TransactionDetailView);
 router.add('/budget', BudgetView);
 router.add('/reports', ReportsView);
 router.add('/debts', DebtsView);
+router.add('/debt', DebtDetailView);
 
 // Запускаем роутер
 router.init();

@@ -7,7 +7,7 @@ use PDO;
 class Debt extends Model {
     protected static string $table = 'debts';
 
-        public static function getTree(int $userId): array {
+    public static function getTree(int $userId): array {
         $instance = new static();
         
         // 1. Получаем все долги
@@ -66,5 +66,24 @@ class Debt extends Model {
         }
 
         return $tree;
+    }
+
+    public static function getWithTransactions(int $id, int $userId): ?array {
+        $instance = new static();
+        $debt = self::find($id);
+        
+        if (!$debt || $debt['user_id'] !== $userId) return null;
+
+        // Получаем транзакции, привязанные к этому долгу
+        $stmt = $instance->db->prepare("
+            SELECT * FROM transactions 
+            WHERE debt_id = :debt_id 
+            AND user_id = :uid
+            ORDER BY transaction_date ASC
+        ");
+        $stmt->execute(['debt_id' => $id, 'uid' => $userId]);
+        $debt['transactions'] = $stmt->fetchAll();
+
+        return $debt;
     }
 }
