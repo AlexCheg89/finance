@@ -7,8 +7,10 @@ use PDO;
 class Debt extends Model {
     protected static string $table = 'debts';
 
-    public static function getTree(int $userId): array {
+        public static function getTree(int $userId): array {
         $instance = new static();
+        
+        // 1. Получаем все долги
         $stmt = $instance->db->prepare("
             SELECT d.*, c.name as category_name 
             FROM debts d
@@ -19,10 +21,39 @@ class Debt extends Model {
         $stmt->execute(['uid' => $userId]);
         $all = $stmt->fetchAll();
 
+        // 2. Считаем РЕАЛЬНО выплаченные суммы (только факт) по каждому долгу
+        // (Связываем транзакции с долгами через debt_id)
+        $stmtPaid = $instance->db->prepare("
+            SELECT debt_id, SUM(amount) as total_paid 
+            FROM transactions 
+            WHERE user_id = :uid 
+            AND status = 'actual' 
+            AND debt_id IS NOT NULL
+            GROUP BY debt_id
+        ");
+        $stmtPaid->execute(['uid' => $userId]);
+        $paidMap = $stmtPaid->fetchAll(PDO::FETCH_KEY_PAIR);
+
+        // 3. Считаем ПЛАНОВЫЕ суммы по каждому долгу (для отображения)
+        $stmtPlanned = $instance->db->prepare("
+            SELECT debt_id, SUM(amount) as total_planned 
+            FROM transactions 
+            WHERE user_id = :uid 
+            AND status = 'planned' 
+            AND debt_id IS NOT NULL
+            GROUP BY debt_id
+        ");
+        $stmtPlanned->execute(['uid' => $userId]);
+        $plannedMap = $stmtPlanned->fetchAll(PDO::FETCH_KEY_PAIR);
+
         $tree = [];
         $children = [];
 
         foreach ($all as $debt) {
+            // Подставляем актуальные суммы
+            $debt['paid_amount'] = (float)($paidMap[$debt['id']] ?? 0); // Реальный факт
+            $debt['planned_amount'] = (float)($plannedMap[$debt['id']] ?? 0); // План
+
             if ($debt['parent_id'] === null) {
                 $tree[] = $debt;
             } else {

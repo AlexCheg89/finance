@@ -35,7 +35,11 @@ export class DebtsView {
             html += `<h2 style="margin-top: 20px; border-bottom: 2px solid var(--primary); padding-bottom: 5px;">${catName}</h2>`;
 
             debts.forEach(debt => {
+                // Считаем прогресс по ФАКТУ
                 const progress = debt.total_amount > 0 ? (debt.paid_amount / debt.total_amount) * 100 : 0;
+                // Считаем прогресс по ПЛАНУ (факт + план)
+                const plannedProgress = debt.total_amount > 0 ? ((debt.paid_amount + debt.planned_amount) / debt.total_amount) * 100 : 0;
+                
                 const remaining = debt.total_amount - debt.paid_amount;
 
                 html += `
@@ -45,9 +49,12 @@ export class DebtsView {
                             <span style="font-weight: bold; color: ${remaining <= 0 ? 'var(--success)' : 'var(--text-main)'};">${formatMoney(debt.total_amount, 'RUB')}</span>
                         </div>
 
-                        <!-- Прогресс-бар -->
-                        <div style="background: rgba(0,0,0,0.1); border-radius: 10px; height: 10px; overflow: hidden; margin-bottom: 5px;">
-                            <div style="width: ${Math.min(progress, 100)}%; height: 100%; background: var(--success);"></div>
+                        <!-- Прогресс-бар (Факт + План) -->
+                        <div style="background: rgba(0,0,0,0.1); border-radius: 10px; height: 10px; overflow: hidden; margin-bottom: 5px; position: relative;">
+                            <!-- Серый фон для плана -->
+                            <div style="width: ${Math.min(plannedProgress, 100)}%; height: 100%; background: #d1d5db; position: absolute; top: 0; left: 0;"></div>
+                            <!-- Зеленый для факта -->
+                            <div style="width: ${Math.min(progress, 100)}%; height: 100%; background: var(--success); position: absolute; top: 0; left: 0;"></div>
                         </div>
 
                         <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: var(--text-muted);">
