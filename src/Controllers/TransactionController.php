@@ -38,24 +38,27 @@ class TransactionController extends Controller {
             Response::error('Укажите счет и сумму больше нуля', 400);
         }
 
-        $data['transaction_date'] = ($data['transaction_date'] ?? date('Y-m-d')) . ' ' . ($data['transaction_time'] ?? date('H:i:s'));
+        // Склеиваем дату и время для основной транзакции
+        $datePart = $data['transaction_date'] ?? date('Y-m-d');
+        $timePart = $data['transaction_time'] ?? date('H:i:s');
+        $data['transaction_date'] = $datePart . ' ' . $timePart;
 
         try {
             $id = Transaction::createFull($data, $user['id']);
 
             // Если это доход запускаем создание обязательств
             if ($data['type'] === 'income') {
-                // Передаем массив с явным временем
+                // Передаем чистую дату (без времени) и время отдельно
                 Obligation::createAutoDebts($user['id'], array_merge($data, [
                     'id' => $id,
-                    'parsed_time' => $data['transaction_time'] ?? '12:00:00', // Явно передаем время
-                    'parsed_date' => $data['transaction_date'] ?? date('Y-m-d') // Явно передаем дату
+                    'parsed_date' => $datePart, // <-- Чистая дата YYYY-MM-DD
+                    'parsed_time' => $timePart  // <-- Чистое время HH:MM:SS
                 ]));
             }
 
             $this->success(['id' => $id], 201);
         } catch (\Exception $e) {
-            Response::error('Ошибка при создании транзакции', 500);
+            Response::error('Ошибка при создании транзакции: ' . $e->getMessage(), 500);
         }
     }
 
@@ -148,7 +151,6 @@ class TransactionController extends Controller {
         $this->success();
     }
 
-    // GET /api/transactions/templates
     public function templates(): void {
         $user = $this->requireAuth();
         $templates = Transaction::getTemplates($user['id']);
