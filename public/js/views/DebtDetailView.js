@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { formatMoney, formatDateTime } from '../utils/format.js';
 import { showErrorModal } from '../utils/status.js';
+import { Modal } from '../components/Modal.js';
 
 export class DebtDetailView {
     async mount(container) {
@@ -54,7 +55,7 @@ export class DebtDetailView {
                 <div style="background: rgba(255,255,255,0.5); border-radius: 12px; overflow: hidden; margin-top: 10px;">
                     ${debt.transactions.length === 0 ? '<p style="padding: 20px; text-align: center;">Нет платежей</p>' : ''}
                     ${debt.transactions.map(tx => `
-                        <div style="display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                        <div class="account-card tx-item" data-id="${tx.id}" data-amount="${tx.amount}" data-status="${tx.status}" data-date="${tx.transaction_date}" style="display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid rgba(0,0,0,0.05); cursor: pointer;">
                             <div>
                                 <div>${formatDateTime(tx.transaction_date)}</div>
                                 <div style="font-size: 0.85em; color: var(--text-muted);">${tx.counterparty}</div>
@@ -72,9 +73,30 @@ export class DebtDetailView {
                 </div>
             </div>
         `;
+        
+        document.querySelectorAll('.tx-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const txId = item.dataset.id;
+                this.openTransactionModal(txId, item.dataset);
+            });
+        });
 
         document.getElementById('back-btn').addEventListener('click', () => {
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/debts' }));
         });
+    }
+
+    openTransactionModal(txId, data) {
+        // Показываем модалку с деталями
+        const modal = new Modal('Детали платежа', `
+            <div style="padding: 10px;">
+                <p><strong>Сумма:</strong> ${formatMoney(data.amount, 'RUB')}</p>
+                <p><strong>Статус:</strong> ${data.status === 'actual' ? 'Факт' : 'План'}</p>
+                <p><strong>Дата:</strong> ${formatDateTime(data.date)}</p>
+                <hr style="margin: 15px 0;">
+                <p style="font-size: 0.9em; color: var(--text-muted);">Здесь можно будет распределить сумму по листам (в разработке).</p>
+            </div>
+        `);
+        modal.open();
     }
 }

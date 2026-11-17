@@ -22,7 +22,6 @@ class Debt extends Model {
         $all = $stmt->fetchAll();
 
         // 2. Считаем РЕАЛЬНО выплаченные суммы (только факт) по каждому долгу
-        // (Связываем транзакции с долгами через debt_id)
         $stmtPaid = $instance->db->prepare("
             SELECT debt_id, SUM(amount) as total_paid 
             FROM transactions 
@@ -34,7 +33,7 @@ class Debt extends Model {
         $stmtPaid->execute(['uid' => $userId]);
         $paidMap = $stmtPaid->fetchAll(PDO::FETCH_KEY_PAIR);
 
-        // 3. Считаем ПЛАНОВЫЕ суммы по каждому долгу (для отображения)
+        // 3. Считаем ПЛАНОВЫЕ суммы по каждому долгу
         $stmtPlanned = $instance->db->prepare("
             SELECT debt_id, SUM(amount) as total_planned 
             FROM transactions 
@@ -51,8 +50,8 @@ class Debt extends Model {
 
         foreach ($all as $debt) {
             // Подставляем актуальные суммы
-            $debt['paid_amount'] = (float)($paidMap[$debt['id']] ?? 0); // Реальный факт
-            $debt['planned_amount'] = (float)($plannedMap[$debt['id']] ?? 0); // План
+            $debt['paid_amount'] = (float)($paidMap[$debt['id']] ?? 0);
+            $debt['planned_amount'] = (float)($plannedMap[$debt['id']] ?? 0);
 
             if ($debt['parent_id'] === null) {
                 $tree[] = $debt;
@@ -61,14 +60,39 @@ class Debt extends Model {
             }
         }
 
+        // 4. Пересчитываем суммы для родительских долгов (Сводных дел)
         foreach ($tree as &$parent) {
+            if (!empty($children[$parent['id']])) {
+                $sumPrincipal = 0;
+                $sumFee = 0;
+                $sumTotal = 0;
+                $sumPaid = 0;
+                $sumPlanned = 0;
+
+                foreach ($children[$parent['id']] as $child) {
+                    $sumPrincipal += (float)$child['principal_amount'];
+                    $sumFee += (float)$child['fee_amount'];
+                    $sumTotal += (float)$child['total_amount'];
+                    $sumPaid += (float)$child['paid_amount'];
+                    $sumPlanned += (float)$child['planned_amount'];
+                }
+
+                // Подменяем суммы родителя на суммы детей
+                $parent['principal_amount'] = $sumPrincipal;
+                $parent['fee_amount'] = $sumFee;
+                $parent['total_amount'] = $sumTotal;
+                $parent['paid_amount'] = $sumPaid;
+                $parent['planned_amount'] = $sumPlanned;
+            }
+            
+            // Прикрепляем детей
             $parent['children'] = $children[$parent['id']] ?? [];
         }
 
         return $tree;
     }
 
-    public static function getWithTransactions(int $id, int $userId): ?array {
+        public static function getWithTransactions(int $id, int $userId): ?array {
         $instance = new static();
         $debt = self::find($id);
         
