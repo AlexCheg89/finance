@@ -72,5 +72,6 @@ $router->add('GET', '/api/reports/summary', function() { (new ReportController()
 // Debts
 $router->add('GET', '/api/debts', function() { (new DebtController())->index(); });
 $router->add('GET', '/api/debts/{id}', function($p) { (new DebtController())->show($p); });
+$router->add('POST', '/api/debts/fix-payments', function() { (new DebtController())->fixPayments(); });
 
 $router->dispatch($method, $uri);

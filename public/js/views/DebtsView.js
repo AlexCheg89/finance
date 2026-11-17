@@ -1,9 +1,10 @@
 import { api } from '../api.js';
 import { formatMoney } from '../utils/format.js';
-import { showErrorModal } from '../utils/status.js';
+import { showErrorModal, showStatus } from '../utils/status.js';
 
 export class DebtsView {
     async mount(container) {
+        this.container = container;
         container.innerHTML = `<div class="dashboard"><p>Загрузка...</p></div>`;
 
         try {
@@ -16,7 +17,24 @@ export class DebtsView {
     }
 
     render(container) {
-        // Группируем по категориям (Долги, Кредиты, Кредитные карты)
+        // 1. СЧИТАЕМ ОБЩИЕ СУММЫ
+        let totalDebt = 0;
+        let totalPaid = 0;
+        let totalPlanned = 0;
+
+        this.debts.forEach(debt => {
+            if (!debt.parent_id) {
+                totalDebt += parseFloat(debt.total_amount);
+                totalPaid += parseFloat(debt.paid_amount || 0);
+                totalPlanned += parseFloat(debt.planned_amount || 0);
+            }
+        });
+
+        const totalProgress = totalDebt > 0 ? (totalPaid / totalDebt) * 100 : 0;
+        const totalPlannedProgress = totalDebt > 0 ? ((totalPaid + totalPlanned) / totalDebt) * 100 : 0;
+        const totalRemaining = totalDebt - totalPaid;
+
+        // 2. ГРУППИРУЕМ ПО КАТЕГОРИЯМ
         const grouped = {};
         this.debts.forEach(d => {
             const cat = d.category_name || 'Без категории';
@@ -24,39 +42,30 @@ export class DebtsView {
             grouped[cat].push(d);
         });
 
-        // Считаем общую сумму долга и выплат
-        let totalDebt = 0;
-        let totalPaid = 0;
-
-        this.debts.forEach(debt => {
-            // Считаем только родительские долги, чтобы не дублировать (если они есть у детей)
-            // Или считаем все, если у детей свои суммы. У вас родитель = сумме детей.
-            // Будем считать только корневые долги (без parent_id)
-            if (!debt.parent_id) {
-                totalDebt += parseFloat(debt.total_amount);
-                totalPaid += parseFloat(debt.paid_amount);
-            }
-        });
-
-        const totalProgress = totalDebt > 0 ? (totalPaid / totalDebt) * 100 : 0;
-        const totalRemaining = totalDebt - totalPaid;
-
+        // 3. ФОРМИРУЕМ HTML
         let html = `
             <div class="dashboard" style="max-width: 1100px;">
-                <header>    
+                <header>
                     <h1>Долги и обязательства</h1>
                     <button id="back-btn" style="width:auto; padding: 5px 15px;">&#8592; Назад</button>
                 </header>
 
-                <!-- Блок общей задолженности -->
                 <div style="background: rgba(255,255,255,0.5); padding: 20px; border-radius: 12px; margin-bottom: 30px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                         <h2>Общая задолженность</h2>
                         <span style="font-size: 1.5em; font-weight: bold; color: var(--danger);">${formatMoney(totalRemaining, 'RUB')}</span>
                     </div>
                     
+                    <!-- Трехцветный прогресс-бар -->
                     <div style="background: rgba(0,0,0,0.1); border-radius: 10px; height: 20px; overflow: hidden; margin-bottom: 10px;">
-                        <div style="width: ${Math.min(totalProgress, 100)}%; height: 100%; background: var(--success);"></div>
+                        <div style="width: 100%; height: 100%; background: linear-gradient(to right, 
+                            var(--success) 0%, 
+                            var(--success) ${Math.min(totalProgress, 100)}%, 
+                            #d1d5db ${Math.min(totalProgress, 100)}%, 
+                            #d1d5db ${Math.min(totalPlannedProgress, 100)}%, 
+                            #e5e7eb ${Math.min(totalPlannedProgress, 100)}%, 
+                            #e5e7eb 100%
+                        );"></div>
                     </div>
                     
                     <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: var(--text-muted);">
@@ -64,53 +73,77 @@ export class DebtsView {
                         <span>Общая сумма долга: ${formatMoney(totalDebt, 'RUB')}</span>
                     </div>
                 </div>
+
+                <div style="margin-bottom: 20px; text-align: right;">
+                    <button id="fix-payments-btn" style="background: #f59e0b; width: auto; padding: 8px 15px;">
+                        &#9881; Распределить старые платежи
+                    </button>
+                </div>
         `;
 
         for (const [catName, debts] of Object.entries(grouped)) {
             html += `<h2 style="margin-top: 20px; border-bottom: 2px solid var(--primary); padding-bottom: 5px;">${catName}</h2>`;
-
+            
             debts.forEach(debt => {
-                // Считаем прогресс по ФАКТУ
-                const progress = debt.total_amount > 0 ? (debt.paid_amount / debt.total_amount) * 100 : 0;
-                // Считаем прогресс по ПЛАНУ (факт + план)
-                const plannedProgress = debt.total_amount > 0 ? ((debt.paid_amount + debt.planned_amount) / debt.total_amount) * 100 : 0;
-                
-                const remaining = debt.total_amount - debt.paid_amount;
+                const paid = parseFloat(debt.paid_amount) || 0;
+                const planned = parseFloat(debt.planned_amount) || 0;
+                const total = parseFloat(debt.total_amount) || 0;
 
+                const progress = total > 0 ? (paid / total) * 100 : 0;
+                const plannedProgress = total > 0 ? ((paid + planned) / total) * 100 : 0;
+                const remaining = total - paid;
+                
                 html += `
                     <div class="account-card debt-card" data-id="${debt.id}" style="margin-bottom: 15px; padding: 15px; cursor: pointer;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                             <strong>${debt.name}</strong>
-                            <span style="font-weight: bold; color: ${remaining <= 0 ? 'var(--success)' : 'var(--text-main)'};">${formatMoney(debt.total_amount, 'RUB')}</span>
+                            <span style="font-weight: bold; color: ${remaining <= 0 ? 'var(--success)' : 'var(--text-main)'};">${formatMoney(total, 'RUB')}</span>
                         </div>
-
-                        <!-- Прогресс-бар (Факт + План) -->
-                        <div style="background: rgba(0,0,0,0.1); border-radius: 10px; height: 10px; overflow: hidden; margin-bottom: 5px; position: relative;">
-                            <!-- Серый фон для плана -->
-                            <div style="width: ${Math.min(plannedProgress, 100)}%; height: 100%; background: #d1d5db; position: absolute; top: 0; left: 0;"></div>
-                            <!-- Зеленый для факта -->
-                            <div style="width: ${Math.min(progress, 100)}%; height: 100%; background: var(--success); position: absolute; top: 0; left: 0;"></div>
+                        
+                        <!-- Трехцветный прогресс-бар -->
+                        <div style="background: rgba(0,0,0,0.1); border-radius: 10px; height: 10px; overflow: hidden; margin-bottom: 5px;">
+                            <div style="width: 100%; height: 100%; background: linear-gradient(to right, 
+                                var(--success) 0%, 
+                                var(--success) ${Math.min(progress, 100)}%, 
+                                #d1d5db ${Math.min(progress, 100)}%, 
+                                #d1d5db ${Math.min(plannedProgress, 100)}%, 
+                                #e5e7eb ${Math.min(plannedProgress, 100)}%, 
+                                #e5e7eb 100%
+                            );"></div>
                         </div>
-
+                        
                         <div style="display: flex; justify-content: space-between; font-size: 0.85em; color: var(--text-muted);">
-                            <span>Выплачено: ${formatMoney(debt.paid_amount, 'RUB')}</span>
+                            <span>Выплачено: ${formatMoney(paid, 'RUB')}</span>
                             <span>Остаток: ${formatMoney(remaining, 'RUB')}</span>
                         </div>
                 `;
 
-                // Если есть дочерние листы (внутри сводного дела)
+                // Дочерние листы
                 if (debt.children && debt.children.length > 0) {
                     html += `<div style="margin-top: 15px; padding-left: 20px; border-left: 2px solid rgba(0,0,0,0.1);">`;
                     debt.children.forEach(child => {
-                        const childProgress = child.total_amount > 0 ? (child.paid_amount / child.total_amount) * 100 : 0;
+                        const childPaid = parseFloat(child.paid_amount) || 0;
+                        const childPlanned = parseFloat(child.planned_amount) || 0;
+                        const childTotal = parseFloat(child.total_amount) || 0;
+
+                        const childProgress = childTotal > 0 ? (childPaid / childTotal) * 100 : 0;
+                        const childPlannedProgress = childTotal > 0 ? ((childPaid + childPlanned) / childTotal) * 100 : 0;
+                        
                         html += `
                             <div style="margin-bottom: 10px; font-size: 0.9em;">
                                 <div style="display: flex; justify-content: space-between;">
                                     <span>${child.name}</span>
-                                    <span>${formatMoney(child.total_amount, 'RUB')}</span>
+                                    <span>${formatMoney(childTotal, 'RUB')}</span>
                                 </div>
                                 <div style="background: rgba(0,0,0,0.1); border-radius: 5px; height: 5px; margin-top: 3px;">
-                                    <div style="width: ${Math.min(childProgress, 100)}%; height: 100%; background: var(--primary);"></div>
+                                    <div style="width: 100%; height: 100%; background: linear-gradient(to right, 
+                                        var(--primary) 0%, 
+                                        var(--primary) ${Math.min(childProgress, 100)}%, 
+                                        #d1d5db ${Math.min(childProgress, 100)}%, 
+                                        #d1d5db ${Math.min(childPlannedProgress, 100)}%, 
+                                        #e5e7eb ${Math.min(childPlannedProgress, 100)}%, 
+                                        #e5e7eb 100%
+                                    );"></div>
                                 </div>
                             </div>
                         `;
@@ -121,19 +154,34 @@ export class DebtsView {
                 html += `</div>`;
             });
         }
-    
+
         html += `</div>`;
         container.innerHTML = html;
 
-         document.querySelectorAll('.debt-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const id = card.dataset.id;
-                window.dispatchEvent(new CustomEvent('navigate', { detail: `/debt/${id}` }));
+        // Обработчики
+        document.getElementById('back-btn').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('navigate', { detail: '/dashboard' }));
+        });
+
+        document.querySelectorAll('.debt-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (!e.target.closest('button')) {
+                    const id = card.dataset.id;
+                    window.dispatchEvent(new CustomEvent('navigate', { detail: `/debt/${id}` }));
+                }
             });
         });
 
-        document.getElementById('back-btn').addEventListener('click', () => {
-            window.dispatchEvent(new CustomEvent('navigate', { detail: '/dashboard' }));
+        document.getElementById('fix-payments-btn').addEventListener('click', async () => {
+            if (!confirm('Распределить старые платежи по листам? Это действие необратимо.')) return;
+            
+            try {
+                const res = await api.post('/debts/fix-payments');
+                showStatus(res.message, 'success');
+                this.mount(this.container);
+            } catch (err) {
+                showErrorModal(err.message);
+            }
         });
     }
 }

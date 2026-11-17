@@ -29,26 +29,32 @@ class Obligation {
         }
 
         $amount = (float)$originalTx['amount'];
-        // Теперь здесь точно только дата (YYYY-MM-DD) без времени
         $date = $originalTx['parsed_date']; 
         $time = $originalTx['parsed_time'];
 
         $pdo = Database::getConnection();
 
+        // ==========================================
         // 2. ИСПОЛНИТЕЛЬНЫЕ ЛИСТЫ (50%)
+        // ==========================================
         $enforcementAmount = $amount * (self::$config['enforcement']['percent'] / 100);
         
         if ($enforcementAmount > 0) {
-            $stmtDebt = $pdo->prepare("SELECT id, total_amount, paid_amount FROM debts WHERE user_id = :uid AND type = 'enforcement' LIMIT 1");
+            // ВАЖНО: Выбираем все нужные поля (total_amount, paid_amount)
+            $stmtDebt = $pdo->prepare("
+                SELECT id, total_amount, paid_amount 
+                FROM debts 
+                WHERE user_id = :uid AND type = 'enforcement' AND parent_id IS NULL 
+                LIMIT 1
+            ");
             $stmtDebt->execute(['uid' => $userId]);
             $debt = $stmtDebt->fetch();
 
             if ($debt) {
-                // Считаем остаток долга: всего минус уже оплачено (включая планы)
-                // НЕ вычитаем planned_amount, так как paid_amount уже включает все удержания
                 $remainingDebt = (float)$debt['total_amount'] - (float)$debt['paid_amount'];
                 
                 if ($remainingDebt > 0) {
+                    // Если удержание больше остатка, уменьшаем его до остатка
                     $actualEnforcement = min($enforcementAmount, $remainingDebt);
 
                     // Сдвигаем время на 1 секунду
@@ -57,6 +63,7 @@ class Obligation {
 
                     $enforcementData = [
                         'account_id' => $originalTx['account_id'],
+                        'debt_id' => $debt['id'], // <-- ПРИВЯЗКА К СВОДНОМУ ДЕЛУ
                         'type' => 'expense',
                         'amount' => $actualEnforcement,
                         'counterparty' => 'Исполнительные листы (авто)',
@@ -71,23 +78,17 @@ class Obligation {
                             'total_price' => $actualEnforcement
                         ]]
                     ];
+                    
+                    // Создаем транзакцию. 
+                    // paid_amount в таблице debts НЕ обновляем (это делает Debt.php на лету по факту)
                     Transaction::createFull($enforcementData, $userId);
-
-                    // Обновляем paid_amount
-                    $stmtUpdateDebt = $pdo->prepare("
-                        UPDATE debts 
-                        SET paid_amount = paid_amount + :amount 
-                        WHERE id = :id
-                    ");
-                    $stmtUpdateDebt->execute([
-                        'amount' => $actualEnforcement,
-                        'id' => $debt['id']
-                    ]);
                 }
             }
         }
 
+        // ==========================================
         // 3. АЛИМЕНТЫ (25%)
+        // ==========================================
         $childBirthDate = new \DateTime(self::$config['alimony']['child_birth_date']);
         $now = new \DateTime($date);
         $age = $now->diff($childBirthDate)->y;

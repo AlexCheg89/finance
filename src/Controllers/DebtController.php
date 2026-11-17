@@ -20,4 +20,10 @@ class DebtController extends Controller {
         
         $this->success(['debt' => $debt]);
     }
+
+    public function fixPayments(): void {
+        $user = $this->requireAuth();
+        $result = \App\Models\Debt::fixOldPayments($user['id']);
+        $this->success($result);
+    }
 }

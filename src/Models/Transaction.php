@@ -69,15 +69,20 @@ class Transaction extends Model {
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare("
-                INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source, has_details, status, is_regular) 
-                VALUES (:uid, :acc, :type, :amount, :counterparty, :date, 'manual', :has_details, :status, :is_regular)
+                INSERT INTO transactions (user_id, account_id, debt_id, type, amount, counterparty, transaction_date, source, has_details, status, is_regular) 
+                VALUES (:uid, :acc, :debt_id, :type, :amount, :counterparty, :date, 'manual', :has_details, :status, :is_regular)
             ");
             $stmt->execute([
-                'uid' => $userId, 'acc' => $data['account_id'], 'type' => $data['type'],
-                'amount' => $data['amount'], 'counterparty' => $data['counterparty'], 
+                'uid' => $userId, 
+                'acc' => $data['account_id'], 
+                'debt_id' => $data['debt_id'] ?? null, // <-- Безопасно для обычных транзакций
+                'type' => $data['type'],
+                'amount' => $data['amount'], 
+                'counterparty' => $data['counterparty'], 
                 'date' => $data['transaction_date'],
-                'has_details' => !empty($data['has_details']) ? (int)$data['has_details'] : 0, 'status' => $data['status'] ?? 'actual', 
-                'is_regular' => !empty($data['is_regular']) ? (int)$data['is_regular'] : 0
+                'has_details' => $data['has_details'] ?? 1, 
+                'status' => $data['status'] ?? 'actual', 
+                'is_regular' => (int)($data['is_regular'] ?? 0)
             ]);
             
             $transactionId = $pdo->lastInsertId();

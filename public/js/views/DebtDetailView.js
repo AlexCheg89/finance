@@ -1,7 +1,6 @@
 import { api } from '../api.js';
 import { formatMoney, formatDateTime } from '../utils/format.js';
 import { showErrorModal } from '../utils/status.js';
-import { Modal } from '../components/Modal.js';
 
 export class DebtDetailView {
     async mount(container) {
@@ -22,8 +21,15 @@ export class DebtDetailView {
 
     render(container) {
         const debt = this.debt;
-        const progress = debt.total_amount > 0 ? (debt.paid_amount / debt.total_amount) * 100 : 0;
-        const remaining = debt.total_amount - debt.paid_amount;
+        
+        // Считаем проценты
+        const paid = parseFloat(debt.paid_amount) || 0;
+        const planned = parseFloat(debt.planned_amount) || 0;
+        const total = parseFloat(debt.total_amount) || 0;
+        
+        const progress = total > 0 ? (paid / total) * 100 : 0;
+        const plannedProgress = total > 0 ? ((paid + planned) / total) * 100 : 0;
+        const remaining = total - paid;
 
         container.innerHTML = `
             <div class="dashboard" style="max-width: 1100px;">
@@ -35,27 +41,46 @@ export class DebtDetailView {
                 <div style="background: rgba(255,255,255,0.5); padding: 20px; border-radius: 12px; margin-bottom: 20px;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                         <span>Общая сумма:</span>
-                        <strong>${formatMoney(debt.total_amount, 'RUB')}</strong>
+                        <strong>${formatMoney(total, 'RUB')}</strong>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
                         <span>Выплачено (факт):</span>
-                        <strong style="color: var(--success);">${formatMoney(debt.paid_amount, 'RUB')}</strong>
+                        <strong style="color: var(--success);">${formatMoney(paid, 'RUB')}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                        <span>Запланировано:</span>
+                        <strong style="color: #6b7280;">${formatMoney(planned, 'RUB')}</strong>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 15px;">
                         <span>Остаток:</span>
                         <strong style="color: var(--danger);">${formatMoney(remaining, 'RUB')}</strong>
                     </div>
                     
-                    <div style="background: rgba(0,0,0,0.1); border-radius: 10px; height: 10px; overflow: hidden;">
-                        <div style="width: ${Math.min(progress, 100)}%; height: 100%; background: var(--success);"></div>
+                    <!-- Трехцветный прогресс-бар -->
+                    <div style="background: rgba(0,0,0,0.1); border-radius: 10px; height: 10px; overflow: hidden; margin-bottom: 5px;">
+                        <div style="width: 100%; height: 100%; background: linear-gradient(to right, 
+                            var(--success) 0%, 
+                            var(--success) ${Math.min(progress, 100)}%, 
+                            #d1d5db ${Math.min(progress, 100)}%, 
+                            #d1d5db ${Math.min(plannedProgress, 100)}%, 
+                            #e5e7eb ${Math.min(plannedProgress, 100)}%, 
+                            #e5e7eb 100%
+                        );"></div>
+                    </div>
+                    
+                    <!-- Легенда под прогресс-баром -->
+                    <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: var(--text-muted); margin-top: 5px;">
+                        <span><span style="display:inline-block; width:8px; height:8px; background:var(--success); border-radius:50%; margin-right:4px;"></span>Факт</span>
+                        <span><span style="display:inline-block; width:8px; height:8px; background:#d1d5db; border-radius:50%; margin-right:4px;"></span>План</span>
+                        <span><span style="display:inline-block; width:8px; height:8px; background:#e5e7eb; border-radius:50%; margin-right:4px;"></span>Остаток</span>
                     </div>
                 </div>
 
                 <h3>История платежей</h3>
                 <div style="background: rgba(255,255,255,0.5); border-radius: 12px; overflow: hidden; margin-top: 10px;">
-                    ${debt.transactions.length === 0 ? '<p style="padding: 20px; text-align: center;">Нет платежей</p>' : ''}
+                    ${debt.transactions.length === 0 ? '<p style="padding: 20px; text-align: center; color: var(--text-muted);">Нет платежей</p>' : ''}
                     ${debt.transactions.map(tx => `
-                        <div class="account-card tx-item" data-id="${tx.id}" data-amount="${tx.amount}" data-status="${tx.status}" data-date="${tx.transaction_date}" style="display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid rgba(0,0,0,0.05); cursor: pointer;">
+                        <div class="account-card tx-item" data-id="${tx.id}" style="display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid rgba(0,0,0,0.05); cursor: pointer;">
                             <div>
                                 <div>${formatDateTime(tx.transaction_date)}</div>
                                 <div style="font-size: 0.85em; color: var(--text-muted);">${tx.counterparty}</div>
@@ -73,30 +98,16 @@ export class DebtDetailView {
                 </div>
             </div>
         `;
-        
-        document.querySelectorAll('.tx-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const txId = item.dataset.id;
-                this.openTransactionModal(txId, item.dataset);
-            });
-        });
 
         document.getElementById('back-btn').addEventListener('click', () => {
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/debts' }));
         });
-    }
 
-    openTransactionModal(txId, data) {
-        // Показываем модалку с деталями
-        const modal = new Modal('Детали платежа', `
-            <div style="padding: 10px;">
-                <p><strong>Сумма:</strong> ${formatMoney(data.amount, 'RUB')}</p>
-                <p><strong>Статус:</strong> ${data.status === 'actual' ? 'Факт' : 'План'}</p>
-                <p><strong>Дата:</strong> ${formatDateTime(data.date)}</p>
-                <hr style="margin: 15px 0;">
-                <p style="font-size: 0.9em; color: var(--text-muted);">Здесь можно будет распределить сумму по листам (в разработке).</p>
-            </div>
-        `);
-        modal.open();
+        document.querySelectorAll('.tx-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const txId = item.dataset.id;
+                window.dispatchEvent(new CustomEvent('navigate', { detail: `/transaction/${txId}` }));
+            });
+        });
     }
 }
