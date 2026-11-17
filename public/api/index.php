@@ -22,6 +22,7 @@ use App\Controllers\AccountController;
 use App\Controllers\TransactionController;
 use App\Controllers\CategoryController;
 use App\Controllers\BudgetController;
+use App\Controllers\DebtController;
 use App\Controllers\ReportController;
 
 Env::load(__DIR__ . '/../../.env');
@@ -67,5 +68,8 @@ $router->add('POST', '/api/budget/close-month', function() { (new BudgetControll
 
 // Reports
 $router->add('GET', '/api/reports/summary', function() { (new ReportController())->summary(); });
+
+// Debts
+$router->add('GET', '/api/debts', function() { (new DebtController())->index(); });
 
 $router->dispatch($method, $uri);
