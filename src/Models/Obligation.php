@@ -51,7 +51,21 @@ class Obligation {
             $debt = $stmtDebt->fetch();
 
             if ($debt) {
-                $remainingDebt = (float)$debt['total_amount'] - (float)$debt['paid_amount'];
+
+                // --- ИСПРАВЛЕНИЕ: Считаем сумму ВСЕХ уже созданных плановых удержаний ---
+                $stmtPlanned = $pdo->prepare("
+                    SELECT COALESCE(SUM(amount), 0) as total_planned 
+                    FROM transactions 
+                    WHERE user_id = :uid 
+                    AND debt_id = :debt_id 
+                    AND status = 'planned'
+                    AND counterparty LIKE '%Исполнительные листы%'
+                ");
+                $stmtPlanned->execute(['uid' => $userId, 'debt_id' => $debt['id']]);
+                $plannedAmount = (float)$stmtPlanned->fetch()['total_planned'];
+
+                // Остаток = всего - оплачено (факт) - запланировано
+                $remainingDebt = (float)$debt['total_amount'] - (float)$debt['paid_amount'] - $plannedAmount;                
                 
                 if ($remainingDebt > 0) {
                     // Если удержание больше остатка, уменьшаем его до остатка

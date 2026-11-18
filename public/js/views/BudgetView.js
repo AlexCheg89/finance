@@ -195,6 +195,10 @@ export class BudgetView {
         const tmplRes = await api.get('/transactions/templates');
         const templates = tmplRes.templates || [];
 
+        // Загружаем долги для выпадающего списка
+        const debtRes = await api.get('/debts');
+        const debts = debtRes.debts || [];
+
         const accountOptions = accRes.accounts.map(acc => 
             `<option value="${acc.id}">${acc.name}</option>`
         ).join('');
@@ -229,7 +233,19 @@ export class BudgetView {
                 <select id="plan-type">
                     <option value="expense">Расход (План)</option>
                     <option value="income">Доход (План)</option>
+                    <option value="debt">Вернуть долг (План)</option>
                 </select>
+
+                <!-- Блок для выбора долга (скрыт по умолчанию) -->
+                <div id="debt-select-container" style="display: none; margin-bottom: 10px;">
+                    <label class="col-muted" style="font-size: 0.85em;">Выберите долг</label>
+                    <select id="plan-debt">
+                        <option value="">-- Выберите --</option>
+                        ${debts.filter(d => !d.parent_id).map(d => 
+                            `<option value="${d.id}">${d.name} (остаток: ${formatMoney(d.total_amount - d.paid_amount, 'RUB')})</option>`
+                        ).join('')}
+                    </select>
+                </div>
                 
                 <input type="number" id="plan-amount" placeholder="Сумма" step="0.01" required>
                 <select id="plan-account">${accountOptions}</select>
@@ -252,26 +268,48 @@ export class BudgetView {
         const modal = new Modal('Запланировать операцию', formHTML);
         modal.open();
 
-        // Обработчик выбора шаблона
+        // --- ЛОГИКА ПОКАЗА/СКРЫТИЯ ВЫБОРА ДОЛГА ---
+        const typeSelect = document.getElementById('plan-type');
+        const debtContainer = document.getElementById('debt-select-container');
+
+        typeSelect.addEventListener('change', (e) => {
+            if (e.target.value === 'debt') {
+                debtContainer.style.display = 'block';
+            } else {
+                debtContainer.style.display = 'none';
+            }
+        });
+
+        // --- ОБРАБОТЧИК ВЫБОРА ШАБЛОНА ---
         const templateSelect = document.getElementById('template-select');
         if (templateSelect) {
             templateSelect.addEventListener('change', (e) => {
                 const option = e.target.selectedOptions[0];
-                if (!option.value) return; // Если выбрали "Новый план"
+                if (!option.value) return;
 
                 // Заполняем поля данными из шаблона
                 document.getElementById('plan-type').value = option.dataset.type;
                 document.getElementById('plan-amount').value = option.dataset.amount;
                 document.getElementById('plan-counterparty').value = option.dataset.counterparty;
                 document.getElementById('plan-account').value = option.dataset.account;
-                document.getElementById('plan-is-regular').checked = true; // Оставляем галочку
+                document.getElementById('plan-is-regular').checked = false; 
             });
         }
 
+        // --- ОТПРАВКА ФОРМЫ ---
         document.getElementById('plan-tx-form').addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            const type = document.getElementById('plan-type').value;
+            const debtId = document.getElementById('plan-debt').value;
+
+            if (type ==='debt && !debtId') {
+                showErrorModal('Выберите долг для возврата');
+                return;
+            }
+
             const payload = {
-                type: document.getElementById('plan-type').value,
+                type: type === 'debt' ? 'expense' : type,
                 amount: parseFloat(document.getElementById('plan-amount').value),
                 account_id: parseInt(document.getElementById('plan-account').value),
                 counterparty: document.getElementById('plan-counterparty').value,
@@ -279,7 +317,8 @@ export class BudgetView {
                 transaction_time: document.getElementById('plan-time').value,
                 has_details: 0, 
                 status: 'planned',
-                is_regular: document.getElementById('plan-is-regular').checked // <-- Передаем флаг
+                is_regular: document.getElementById('plan-is-regular').checked ? 1:0,
+                debt_id: (type === 'debt') ? parseInt(debtId):null
             };
 
             try {
