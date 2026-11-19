@@ -4,19 +4,24 @@ namespace App\Models;
 use App\Database;
 
 class Obligation {
-    
-    private static $config = [
-        'alimony' => [
-            'child_birth_date' => '2022-05-07',
-            'percent' => 25,
-            'offset_minutes' => 30,
-            'category_id' => 38
-        ],
-        'enforcement' => [
-            'percent' => 50,
-            'category_id' => 39,
-        ]
-    ];
+
+    // Вспомогательный метод для получения конфигурации пользователя из БД
+    private static function getUserConfig(int $userId): array {
+        $settings = Setting::getAll($userId);
+
+        return [
+            'alimony' => [
+                'child_birth_date' => $settings['alimony_child_birth_date'] ?? null,
+                'percent'          => (float)($settings['alimony_percent'] ?? 0),
+                'offset_minutes'   => (int)($settings['alimony_offset_minutes'] ?? 30),
+                'category_id'      => !empty($settings['alimony_category_id']) ? (int)$settings['alimony_category_id'] : null,
+            ],
+            'enforcement' => [
+                'percent'     => (float)($settings['enforcement_percent'] ?? 0),
+                'category_id' => !empty($settings['enforcement_category_id']) ? (int)$settings['enforcement_category_id'] : null,
+            ]
+        ];
+    }
 
     public static function createAutoDebts(int $userId, array $originalTx): void {
         $counterparty = mb_strtolower($originalTx['counterparty'] ?? '');
@@ -28,6 +33,7 @@ class Obligation {
             return;
         }
 
+        $config = self::getUserConfig($userId);
         $amount = (float)$originalTx['amount'];
         $date = $originalTx['parsed_date']; 
         $time = $originalTx['parsed_time'];
@@ -35,24 +41,22 @@ class Obligation {
         $pdo = Database::getConnection();
 
         // ==========================================
-        // 2. ИСПОЛНИТЕЛЬНЫЕ ЛИСТЫ (50%)
+        // 1. ИСПОЛНИТЕЛЬНЫЕ ЛИСТЫ
         // ==========================================
-        $enforcementAmount = $amount * (self::$config['enforcement']['percent'] / 100);
+        $enfPercent = $config['enforcement']['percent'];
+        $enforcementAmount = $amount * ($enfPercent / 100);
         
         if ($enforcementAmount > 0) {
-            // ВАЖНО: Выбираем все нужные поля (total_amount, paid_amount)
             $stmtDebt = $pdo->prepare("
                 SELECT id, total_amount, paid_amount 
                 FROM debts 
-                WHERE user_id = :uid AND type = 'enforcement' AND parent_id IS NULL 
+                WHERE user_id = :uid AND type = 'enforcement' AND parent_id IS NULL AND actual_close_date IS NULL
                 LIMIT 1
             ");
             $stmtDebt->execute(['uid' => $userId]);
             $debt = $stmtDebt->fetch();
 
             if ($debt) {
-
-                // --- ИСПРАВЛЕНИЕ: Считаем сумму ВСЕХ уже созданных плановых удержаний ---
                 $stmtPlanned = $pdo->prepare("
                     SELECT COALESCE(SUM(amount), 0) as total_planned 
                     FROM transactions 
@@ -64,20 +68,16 @@ class Obligation {
                 $stmtPlanned->execute(['uid' => $userId, 'debt_id' => $debt['id']]);
                 $plannedAmount = (float)$stmtPlanned->fetch()['total_planned'];
 
-                // Остаток = всего - оплачено (факт) - запланировано
                 $remainingDebt = (float)$debt['total_amount'] - (float)$debt['paid_amount'] - $plannedAmount;                
                 
                 if ($remainingDebt > 0) {
-                    // Если удержание больше остатка, уменьшаем его до остатка
                     $actualEnforcement = min($enforcementAmount, $remainingDebt);
-
-                    // Сдвигаем время на 1 секунду
                     $enforcementTime = date('H:i:s', strtotime($time . ' +1 second'));
                     $enforcementDateTime = $date . ' ' . $enforcementTime;
 
                     $enforcementData = [
                         'account_id' => $originalTx['account_id'],
-                        'debt_id' => $debt['id'], // <-- ПРИВЯЗКА К СВОДНОМУ ДЕЛУ
+                        'debt_id' => $debt['id'],
                         'type' => 'expense',
                         'amount' => $actualEnforcement,
                         'counterparty' => 'Исполнительные листы (авто)',
@@ -86,93 +86,115 @@ class Obligation {
                         'status' => 'planned',
                         'items' => [[
                             'name' => 'Удержание по ИП',
-                            'category_id' => self::$config['enforcement']['category_id'],
+                            'category_id' => $config['enforcement']['category_id'],
                             'quantity' => 1,
                             'unit_price' => $actualEnforcement,
                             'total_price' => $actualEnforcement
                         ]]
                     ];
                     
-                    // Создаем транзакцию. 
-                    // paid_amount в таблице debts НЕ обновляем (это делает Debt.php на лету по факту)
                     Transaction::createFull($enforcementData, $userId);
                 }
             }
         }
 
         // ==========================================
-        // 3. АЛИМЕНТЫ (25%)
+        // 2. АЛИМЕНТЫ
         // ==========================================
-        $childBirthDate = new \DateTime(self::$config['alimony']['child_birth_date']);
-        $now = new \DateTime($date);
-        $age = $now->diff($childBirthDate)->y;
-        
-        if ($age < 18) {
-            $alimonyAmount = $amount * (self::$config['alimony']['percent'] / 100);
-            $alimonyTime = date('H:i:s', strtotime($time . ' +30 minutes'));
-            $alimonyDateTime = $date . ' ' . $alimonyTime;
+        $birthDateStr = $config['alimony']['child_birth_date'];
+        $alimonyPercent = $config['alimony']['percent'];
 
-            $alimonyData = [
-                'account_id' => $originalTx['account_id'],
-                'type' => 'expense',
-                'amount' => $alimonyAmount,
-                'counterparty' => 'Алименты (авто)',
-                'transaction_date' => $alimonyDateTime,
-                'has_details' => 0,
-                'status' => 'planned',
-                'items' => [[
-                    'name' => 'Алименты',
-                    'category_id' => self::$config['alimony']['category_id'],
-                    'quantity' => 1,
-                    'unit_price' => $alimonyAmount,
-                    'total_price' => $alimonyAmount
-                ]]
-            ];
-            Transaction::createFull($alimonyData, $userId);
+        if ($birthDateStr && $alimonyPercent > 0) {
+            $childBirthDate = new \DateTime($birthDateStr);
+            $now = new \DateTime($date);
+            $age = $now->diff($childBirthDate)->y;
+            
+            if ($age < 18) {
+                $alimonyAmount = $amount * ($alimonyPercent / 100);
+                $offset = $config['alimony']['offset_minutes'];
+                $alimonyTime = date('H:i:s', strtotime($time . " +{$offset} minutes"));
+                $alimonyDateTime = $date . ' ' . $alimonyTime;
+
+                $alimonyData = [
+                    'account_id' => $originalTx['account_id'],
+                    'type' => 'expense',
+                    'amount' => $alimonyAmount,
+                    'counterparty' => 'Алименты (авто)',
+                    'transaction_date' => $alimonyDateTime,
+                    'has_details' => 0,
+                    'status' => 'planned',
+                    'items' => [[
+                        'name' => 'Алименты',
+                        'category_id' => $config['alimony']['category_id'],
+                        'quantity' => 1,
+                        'unit_price' => $alimonyAmount,
+                        'total_price' => $alimonyAmount
+                    ]]
+                ];
+                Transaction::createFull($alimonyData, $userId);
+            }
         }
     }
 
-    // Перечет обязательств при изменении суммы дохода
+    // Пересчет обязательств при изменении суммы дохода
     public static function recalculateDebts(int $userId, array $originalTx): void {
+        $config = self::getUserConfig($userId);
         $amount = (float)$originalTx['amount'];
         $date = date('Y-m-d', strtotime($originalTx['transaction_date']));
-        $time = date('H:i:s', strtotime($originalTx['transaction_date']));
         $pdo = Database::getConnection();
 
-        // 1. Пересчитываем Алименты (25%)
-        $alimonyAmount = $amount * (self::$config['alimony']['percent'] / 100);
+        // 1. Пересчитываем Алименты
+        if ($config['alimony']['percent'] > 0) {
+            $alimonyAmount = $amount * ($config['alimony']['percent'] / 100);
+            self::updatePlannedTransactionAmount($pdo, $userId, '%Алименты%', $date, $alimonyAmount);
+        }
 
-        $stmtAlimony = $pdo->prepare("
-            UPDATE transactions 
-            SET amount = :amount 
+        // 2. Пересчитываем Исполнительные листы
+        if ($config['enforcement']['percent'] > 0) {
+            $enforcementAmount = $amount * ($config['enforcement']['percent'] / 100);
+            self::updatePlannedTransactionAmount($pdo, $userId, '%Исполнительные листы%', $date, $enforcementAmount);
+        }
+    }
+
+    // Синхронное обновление суммы в transactions и transaction_items
+    private static function updatePlannedTransactionAmount(\PDO $pdo, int $userId, string $counterpartyPattern, string $date, float $newAmount): void {
+        // Находим ID нужной плановой транзакции за этот день
+        $stmtFind = $pdo->prepare("
+            SELECT id 
+            FROM transactions 
             WHERE user_id = :uid 
-            AND status = 'planned'
-            AND counterparty LIKE '%Алименты%'
-            AND transaction_date LIKE :date
+              AND status = 'planned' 
+              AND counterparty LIKE :pattern 
+              AND transaction_date LIKE :date 
             LIMIT 1
         ");
-        $stmtAlimony->execute([
-            'amount' => $alimonyAmount,
-            'uid' => $userId,
-            'date' => $date . '%'
+        $stmtFind->execute([
+            'uid'     => $userId,
+            'pattern' => $counterpartyPattern,
+            'date'    => $date . '%'
         ]);
+        
+        $tx = $stmtFind->fetch();
+        if (!$tx) {
+            return;
+        }
 
-        // 2. Пересчитываем Исполнительные листы (50%)
-        $enforcementAmount = $amount * (self::$config['enforcement']['percent'] / 100);
+        $txId = (int)$tx['id'];
 
-        $stmtEnforcement = $pdo->prepare("
-            UPDATE transactions 
-            SET amount = :amount 
-            WHERE user_id = :uid 
-            AND status = 'planned'
-            AND counterparty LIKE '%Исполнительные листы%'
-            AND transaction_date LIKE :date
-            LIMIT 1
+        // 1. Обновляем основную сумму транзакции
+        $stmtUpdTx = $pdo->prepare("UPDATE transactions SET amount = :amount WHERE id = :id");
+        $stmtUpdTx->execute(['amount' => $newAmount, 'id' => $txId]);
+
+        // 2. Обновляем цену и итоговую стоимость позиции в чеке
+        $stmtUpdItem = $pdo->prepare("
+            UPDATE transaction_items 
+            SET unit_price = :price, total_price = :total 
+            WHERE transaction_id = :tid
         ");
-        $stmtEnforcement->execute([
-            'amount' => $enforcementAmount,
-            'uid' => $userId,
-            'date' => $date . '%'
+        $stmtUpdItem->execute([
+            'price' => $newAmount,
+            'total' => $newAmount,
+            'tid'   => $txId
         ]);
     }
 }

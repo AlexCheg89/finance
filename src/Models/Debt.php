@@ -25,8 +25,20 @@ class Debt extends Model {
         $stmtPaid = $instance->db->prepare("
             SELECT 
                 d.id,
-                COALESCE(SUM(CASE WHEN t.status = 'actual' THEN t.amount ELSE 0 END), 0) as direct_paid,
-                COALESCE((SELECT SUM(dp.amount) FROM debt_payments dp JOIN transactions t2 ON dp.transaction_id = t2.id WHERE dp.debt_id = d.id AND t2.status = 'actual'), 0) as distributed_paid
+                COALESCE(SUM(
+                    CASE 
+                        WHEN t.status = 'actual' 
+                        AND (t.counterparty IS NULL OR t.counterparty != 'Проценты по кредиту')
+                        THEN t.amount 
+                        ELSE 0 
+                    END
+                ), 0) as direct_paid,
+                COALESCE((
+                    SELECT SUM(dp.amount) 
+                    FROM debt_payments dp 
+                    JOIN transactions t2 ON dp.transaction_id = t2.id 
+                    WHERE dp.debt_id = d.id AND t2.status = 'actual'
+                ), 0) as distributed_paid
             FROM debts d
             LEFT JOIN transactions t ON t.debt_id = d.id
             WHERE d.user_id = :uid
@@ -108,8 +120,20 @@ class Debt extends Model {
         // Считаем ФАКТ по этому долгу
         $stmtPaid = $instance->db->prepare("
             SELECT 
-                COALESCE(SUM(CASE WHEN t.status = 'actual' THEN t.amount ELSE 0 END), 0) as direct_paid,
-                COALESCE((SELECT SUM(dp.amount) FROM debt_payments dp JOIN transactions t2 ON dp.transaction_id = t2.id WHERE dp.debt_id = :id_inner AND t2.status = 'actual'), 0) as distributed_paid
+                COALESCE(SUM(
+                    CASE 
+                        WHEN t.status = 'actual' 
+                        AND (t.counterparty IS NULL OR t.counterparty != 'Проценты по кредиту')
+                        THEN t.amount 
+                        ELSE 0 
+                    END
+                ), 0) as direct_paid,
+                COALESCE((
+                    SELECT SUM(dp.amount) 
+                    FROM debt_payments dp 
+                    JOIN transactions t2 ON dp.transaction_id = t2.id 
+                    WHERE dp.debt_id = :id_inner AND t2.status = 'actual'
+                ), 0) as distributed_paid
             FROM transactions t
             WHERE t.debt_id = :id_outer AND t.user_id = :uid_paid
         ");
@@ -236,5 +260,64 @@ class Debt extends Model {
             WHERE id = :id
         ");
         $stmt->execute(['amount' => $amount, 'id' => $debtId]);
+    }
+
+    // Фиксация фактических выплат в колонке paid_amount таблицы debts
+    public static function syncPaidAmount(int $debtId): void {
+        $instance = new static();
+        $pdo = $instance->db;
+
+        // Считаем только ФАКТ (status = 'actual'), исключая проценты по кредиту
+        $stmt = $pdo->prepare("
+            SELECT 
+                d.parent_id,
+                d.total_amount,
+                COALESCE((
+                    SELECT SUM(t.amount) 
+                    FROM transactions t 
+                    WHERE t.debt_id = d.id 
+                      AND t.status = 'actual'
+                      AND (t.counterparty IS NULL OR t.counterparty != 'Проценты по кредиту')
+                ), 0) +
+                COALESCE((
+                    SELECT SUM(dp.amount) 
+                    FROM debt_payments dp 
+                    JOIN transactions t2 ON dp.transaction_id = t2.id 
+                    WHERE dp.debt_id = d.id 
+                      AND t2.status = 'actual'
+                ), 0) AS actual_paid
+            FROM debts d
+            WHERE d.id = :id
+            LIMIT 1
+        ");
+        $stmt->execute(['id' => $debtId]);
+        $row = $stmt->fetch();
+
+        if (!$row) {
+            return;
+        }
+
+        $actualPaid = (float)$row['actual_paid'];
+        $totalAmount = (float)$row['total_amount'];
+        $closeDate = ($totalAmount > 0 && $actualPaid >= $totalAmount) ? date('Y-m-d') : null;
+
+        // Записываем актуальный факт в paid_amount и ставим дату закрытия, если долг погашен
+        $stmtUpd = $pdo->prepare("
+            UPDATE debts 
+            SET paid_amount = :paid,
+                actual_close_date = IF(:close_date_check IS NOT NULL, COALESCE(actual_close_date, :close_date_val), NULL)
+            WHERE id = :id
+        ");
+        $stmtUpd->execute([
+            'paid'             => $actualPaid,
+            'close_date_check' => $closeDate,
+            'close_date_val'   => $closeDate,
+            'id'               => $debtId
+        ]);
+
+        // Если это дочерний лист сводного дела — пересчитываем родителя
+        if (!empty($row['parent_id'])) {
+            self::syncPaidAmount((int)$row['parent_id']);
+        }
     }
 }

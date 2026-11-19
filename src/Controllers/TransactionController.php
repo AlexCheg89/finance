@@ -29,27 +29,40 @@ class TransactionController extends Controller {
         );
     }
 
-    private function handleInterest(int $userId, array $tx, array $data): void {
-        $interestAmount = (float)$data['interest_amount'];
-        $totalAmount = (float)($data['amount'] ?? $tx['amount']);
-        
+    private function handleInterest(int $userId, array $tx, array $data, float $interestAmount): void {
+        $principalPayment = (float)$data['amount'];
         $pdo = Database::getConnection();
-              
+
+        // Обновляем сумму в позиции основной транзакции (используем два разных плейсхолдера :price и :total)
+        $stmtUpdMainItem = $pdo->prepare("
+            UPDATE transaction_items 
+            SET unit_price = :price, total_price = :total 
+            WHERE transaction_id = :tid
+        ");
+        $stmtUpdMainItem->execute([
+            'price' => $principalPayment,
+            'total' => $principalPayment,
+            'tid'   => $tx['id']
+        ]);
+
         // Получаем категорию процентов из долга
         $stmtDebt = $pdo->prepare("SELECT interest_category_id FROM debts WHERE id = :id");
         $stmtDebt->execute(['id' => $tx['debt_id']]);
         $debt = $stmtDebt->fetch();
-        
+
         if ($debt && $debt['interest_category_id']) {
+            $datePart = $data['transaction_date'] ?? date('Y-m-d', strtotime($tx['transaction_date']));
+            $timePart = $data['transaction_time'] ?? date('H:i:s', strtotime($tx['transaction_date']));
+
             $interestData = [
-                'account_id' => $tx['account_id'],
+                'account_id' => $data['account_id'] ?? $tx['account_id'],
                 'debt_id' => $tx['debt_id'],
                 'type' => 'expense',
                 'amount' => $interestAmount,
                 'counterparty' => 'Проценты по кредиту',
-                'transaction_date' => $tx['transaction_date'],
+                'transaction_date' => $datePart . ' ' . $timePart,
                 'has_details' => 0,
-                'status' => 'actual',
+                'status' => $data['status'] ?? $tx['status'],
                 'items' => [[
                     'name' => 'Проценты',
                     'category_id' => $debt['interest_category_id'],
@@ -60,9 +73,8 @@ class TransactionController extends Controller {
             ];
             Transaction::createFull($interestData, $userId);
         }
-        
-        // Уменьшаем основной долг на (общая сумма - проценты)
-        $principalPayment = $totalAmount - $interestAmount;
+
+        // Уменьшаем основной долг только на сумму тела долга
         if ($principalPayment > 0) {
             Debt::reducePrincipal($tx['debt_id'], $principalPayment);
         }
@@ -135,14 +147,29 @@ class TransactionController extends Controller {
         }
 
         try {
-            Transaction::updateTransaction($id, $data, $user['id']);
+            $interestAmount = isset($data['interest_amount']) ? (float)$data['interest_amount'] : 0;
 
-            // Если есть проценты и транзакция привязана к долгу
-            if (isset($data['interest_amount']) && $data['interest_amount'] > 0 && $tx['debt_id']) {
-                $this->handleInterest($user['id'], $tx, $data);
+            // Если выделяем проценты по кредиту — сначала уменьшаем сумму основной транзакции (тело долга)
+            if ($interestAmount > 0 && $tx['debt_id']) {
+                $totalAmount = (float)($data['amount'] ?? $tx['amount']);
+                
+                if ($interestAmount > $totalAmount) {
+                    Response::error('Сумма процентов не может превышать сумму платежа', 400);
+                }
+
+                // В основную транзакцию записываем только погашение тела долга
+                $data['amount'] = $totalAmount - $interestAmount;
             }
 
-            // Пересчет обязательств (если это доход и статус стал actual)
+            // 1. Обновляем основную транзакцию и баланс счета на сумму тела долга
+            Transaction::updateTransaction($id, $data, $user['id']);
+
+            // 2. Создаем отдельную транзакцию на проценты и уменьшаем остаток долга
+            if ($interestAmount > 0 && $tx['debt_id']) {
+                $this->handleInterest($user['id'], $tx, $data, $interestAmount);
+            }
+
+            // 3. Пересчет обязательств (если это доход и статус стал actual)
             $newStatus = $data['status'] ?? $tx['status'];
             if ($tx['type'] === 'income' && $newStatus === 'actual') {
                 $this->recalculateObligations($user['id'], $tx, $data);

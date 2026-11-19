@@ -313,9 +313,9 @@ export class TransactionDetailView {
 
     openEditModal(container) {
         const tx = this.tx;
-        const dateObj = new Date(tx.transaction_date.replace(' ', 'T'));
-        const dateStr = dateObj.toISOString().split('T')[0];
-        const timeStr = dateObj.toTimeString().slice(0, 5);
+        const [rawDate, rawTime] = (tx.transaction_date || '').split(' ');
+        const dateStr = rawDate || new Date().toISOString().split('T')[0];
+        const timeStr = rawTime ? rawTime.slice(0, 5) : '12:00';
 
         // Загружаем счета
         let accounts = store.state.accounts;

@@ -111,6 +111,10 @@ class Transaction extends Model {
                 $updateBalance->execute(['amount' => $data['amount'], 'acc_id' => $data['account_id'], 'uid' => $userId]);
             }
 
+            if (!empty($data['debt_id']) && ($data['status'] ?? 'actual') === 'actual') {
+                Debt::syncPaidAmount((int)$data['debt_id']);
+            }
+
             $pdo->commit();
             return $transactionId;
         } catch (\Exception $e) {
@@ -173,7 +177,15 @@ class Transaction extends Model {
         $oldAccountId = (int)$oldTx['account_id'];
         $newAccountId = isset($data['account_id']) ? (int)$data['account_id'] : $oldAccountId;
         
-        $datetime = ($data['transaction_date'] ?? date('Y-m-d')) . ' ' . ($data['transaction_time'] ?? '00:00:00');
+        $datePart = !empty($data['transaction_date']) ? trim($data['transaction_date']) : date('Y-m-d', strtotime($oldTx['transaction_date']));
+        $timePart = !empty($data['transaction_time']) ? trim($data['transaction_time']) : date('H:i:s', strtotime($oldTx['transaction_date']));
+        
+        // Если время передано в формате HH:MM (без секунд), добавляем :00
+        if (strlen($timePart) === 5) {
+            $timePart .= ':00';
+        }
+        
+        $datetime = $datePart . ' ' . $timePart;
 
         $pdo->beginTransaction();
         try {
@@ -228,6 +240,10 @@ class Transaction extends Model {
                     ? "UPDATE accounts SET balance = balance + :amount WHERE id = :acc" 
                     : "UPDATE accounts SET balance = balance - :amount WHERE id = :acc");
                 $balStmt->execute(['amount' => $oldAmount, 'acc' => $oldAccountId]);
+            }
+
+            if (!empty($oldTx['debt_id']) && ($oldStatus === 'actual' || $newStatus === 'actual')) {
+                Debt::syncPaidAmount((int)$oldTx['debt_id']);
             }
 
             $pdo->commit();
