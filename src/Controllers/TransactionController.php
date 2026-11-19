@@ -16,7 +16,7 @@ class TransactionController extends Controller {
 
     private function recalculateObligations(int $userId, array $oldTx, array $newData): void {
         $newAmount = isset($newData['amount']) ? (float)$newData['amount'] : (float)$oldTx['amount'];
-        $newDate = isset($newData['transactions_date'])
+        $newDate = isset($newData['transaction_date'])
             ? $newData['transaction_date'] . ' ' . ($newData['transaction_time'] ?? '00:00:00')
             : $oldTx['transaction_date'];
         
@@ -34,17 +34,7 @@ class TransactionController extends Controller {
         $totalAmount = (float)($data['amount'] ?? $tx['amount']);
         
         $pdo = Database::getConnection();
-        
-        // Получаем категорию процентов из долга
-        $stmtDebt = $pdo->prepare("SELECT interest_category_id FROM debts WHERE id = :id");
-        $stmtDebt->execute(['id' => $tx['debt_id']]);
-        $debt = $stmtDebt->fetch();
-
-        $interestAmount = (float)$data['interest_amount'];
-        $totalAmount = (float)($data['amount'] ?? $tx['amount']);
-        
-        $pdo = Database::getConnection();
-        
+              
         // Получаем категорию процентов из долга
         $stmtDebt = $pdo->prepare("SELECT interest_category_id FROM debts WHERE id = :id");
         $stmtDebt->execute(['id' => $tx['debt_id']]);

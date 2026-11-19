@@ -303,7 +303,7 @@ export class BudgetView {
             const type = document.getElementById('plan-type').value;
             const debtId = document.getElementById('plan-debt').value;
 
-            if (type ==='debt && !debtId') {
+            if (type ==='debt' && !debtId) {
                 showErrorModal('Выберите долг для возврата');
                 return;
             }
