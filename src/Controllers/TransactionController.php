@@ -12,6 +12,21 @@ class TransactionController extends Controller {
         return (int)$tx['is_reconciled'] === 0;
     }
 
+    private function recalculateObligations(int $userId, array $oldTx, array $newData): void {
+        $newAmount = isset($newData['amount']) ? (float)$newData['amount'] : (float)$oldTx['amount'];
+        $newDate = isset($newData['transactions_date'])
+            ? $newData['transaction_date'] . ' ' . ($newData['transaction_time'] ?? '00:00:00')
+            : $oldTx['transaction_date'];
+        
+        Obligation::recalculateDebts(
+            $userId,
+            array_merge($oldTx, [
+                'amount' => $newAmount,
+                'transaction_date' => $newDate
+            ])
+        );
+    }
+
     public function index(): void {
         $user = $this->requireAuth();
 
@@ -80,6 +95,12 @@ class TransactionController extends Controller {
 
         try {
             Transaction::updateTransaction($id, $data, $user['id']);
+
+            $newStatus = $data['status'] ?? $tx['status'];
+            if ($tx['type' === 'income' && $newStatus === 'actual']) {
+                $this->recalculateObligations($user['id'], $tx, $data);
+            }
+
             $this->success();
         } catch (\Exception $e) {
             Response::error('Ошибка при обновлении: ' . $e->getMessage(), 500);

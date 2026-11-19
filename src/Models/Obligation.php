@@ -131,4 +131,48 @@ class Obligation {
             Transaction::createFull($alimonyData, $userId);
         }
     }
+
+    // Перечет обязательств при изменении суммы дохода
+    public static function recalculateDebts(int $userId, array $originalTx): void {
+        $amount = (float)$originalTx['amount'];
+        $date = date('Y-m-d', strtotime($originalTx['transaction_date']));
+        $time = date('H:i:s', strtotime($originalTx['transaction_date']));
+        $pdo = Database::getConnection();
+
+        // 1. Пересчитываем Алименты (25%)
+        $alimonyAmount = $amount * (self::$config['alimony']['percent'] / 100);
+
+        $stmtAlimony = $pdo->prepare("
+            UPDATE transactions 
+            SET amount = :amount 
+            WHERE user_id = :uid 
+            AND status = 'planned'
+            AND counterparty LIKE '%Алименты%'
+            AND transaction_date LIKE :date
+            LIMIT 1
+        ");
+        $stmtAlimony->execute([
+            'amount' => $alimonyAmount,
+            'uid' => $userId,
+            'date' => $date . '%'
+        ]);
+
+        // 2. Пересчитываем Исполнительные листы (50%)
+        $enforcementAmount = $amount * (self::$config['enforcement']['percent'] / 100);
+
+        $stmtEnforcement = $pdo->prepare("
+            UPDATE transactions 
+            SET amount = :amount 
+            WHERE user_id = :uid 
+            AND status = 'planned'
+            AND counterparty LIKE '%Исполнительные листы%'
+            AND transaction_date LIKE :date
+            LIMIT 1
+        ");
+        $stmtEnforcement->execute([
+            'amount' => $enforcementAmount,
+            'uid' => $userId,
+            'date' => $date . '%'
+        ]);
+    }
 }
