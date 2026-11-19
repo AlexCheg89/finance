@@ -48,7 +48,13 @@ class Transaction extends Model {
     // Получить одну транзакцию с позициями
     public static function findWithItems(int $id, int $userId): ?array {
         $instance = new static();
-        $stmt = $instance->db->prepare("SELECT t.*, a.name as account_name FROM transactions t JOIN accounts a ON t.account_id = a.id WHERE t.id = :id AND t.user_id = :uid");
+        $stmt = $instance->db->prepare("
+            SELECT t.*, a.name as account_name, d.type as debt_type 
+            FROM transactions t 
+            JOIN accounts a ON t.account_id = a.id 
+            LEFT JOIN debts d ON t.debt_id = d.id
+            WHERE t.id = :id AND t.user_id = :uid
+        ");
         $stmt->execute(['id' => $id, 'uid' => $userId]);
         $tx = $stmt->fetch();
 

@@ -99,7 +99,7 @@ class Debt extends Model {
         return $tree;
     }
 
-        public static function getWithTransactions(int $id, int $userId): ?array {
+    public static function getWithTransactions(int $id, int $userId): ?array {
         $instance = new static();
         $debt = self::find($id);
         
@@ -226,5 +226,15 @@ class Debt extends Model {
         }
 
         return ['message' => "Распределено транзакций: $count"];
+    }
+
+    public static function reducePrincipal(int $debtId, float $amount): void {
+        $instance = new static();
+        $stmt = $instance->db->prepare("
+            UPDATE debts 
+            SET principal_amount = GREATEST(0, principal_amount - :amount) 
+            WHERE id = :id
+        ");
+        $stmt->execute(['amount' => $amount, 'id' => $debtId]);
     }
 }
