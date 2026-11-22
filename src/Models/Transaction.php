@@ -74,21 +74,29 @@ class Transaction extends Model {
         
         $pdo->beginTransaction();
         try {
+            // Определяем статус распределения
+            $debtPaymentStatus = $data['debt_payment_status'] ?? null;
+            if ($debtPaymentStatus === null) {
+                // Если привязано к долгу и статус не указан - ставим pending
+                $debtPaymentStatus = !empty($data['debt_id']) ? 'pending' : 'none';
+            }
+
             $stmt = $pdo->prepare("
-                INSERT INTO transactions (user_id, account_id, debt_id, type, amount, counterparty, transaction_date, source, has_details, status, is_regular) 
-                VALUES (:uid, :acc, :debt_id, :type, :amount, :counterparty, :date, 'manual', :has_details, :status, :is_regular)
+                INSERT INTO transactions (user_id, account_id, debt_id, type, amount, counterparty, transaction_date, source, has_details, status, is_regular, debt_payment_status) 
+                VALUES (:uid, :acc, :debt_id, :type, :amount, :counterparty, :date, 'manual', :has_details, :status, :is_regular, :debt_payment_status)
             ");
             $stmt->execute([
                 'uid' => $userId, 
                 'acc' => $data['account_id'], 
-                'debt_id' => $data['debt_id'] ?? null, // <-- Безопасно для обычных транзакций
+                'debt_id' => $data['debt_id'] ?? null,
                 'type' => $data['type'],
                 'amount' => $data['amount'], 
                 'counterparty' => $data['counterparty'], 
                 'date' => $data['transaction_date'],
                 'has_details' => $data['has_details'] ?? 1, 
                 'status' => $data['status'] ?? 'actual', 
-                'is_regular' => (int)($data['is_regular'] ?? 0)
+                'is_regular' => (int)($data['is_regular'] ?? 0),
+                'debt_payment_status' => $debtPaymentStatus
             ]);
             
             $transactionId = $pdo->lastInsertId();

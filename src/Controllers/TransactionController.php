@@ -63,6 +63,7 @@ class TransactionController extends Controller {
                 'transaction_date' => $datePart . ' ' . $timePart,
                 'has_details' => 0,
                 'status' => $data['status'] ?? $tx['status'],
+                'debt_payment_status' => 'none',
                 'items' => [[
                     'name' => 'Проценты',
                     'category_id' => $debt['interest_category_id'],

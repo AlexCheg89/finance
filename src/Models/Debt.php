@@ -21,7 +21,7 @@ class Debt extends Model {
         $stmt->execute(['uid' => $userId]);
         $all = $stmt->fetchAll();
 
-        // 2. Считаем РЕАЛЬНО выплаченные суммы (только факт)
+        // 2. Считаем РЕАЛЬНО выплаченные суммы (только факт, только is_planned = FALSE)
         $stmtPaid = $instance->db->prepare("
             SELECT 
                 d.id,
@@ -37,7 +37,9 @@ class Debt extends Model {
                     SELECT SUM(dp.amount) 
                     FROM debt_payments dp 
                     JOIN transactions t2 ON dp.transaction_id = t2.id 
-                    WHERE dp.debt_id = d.id AND t2.status = 'actual'
+                    WHERE dp.debt_id = d.id 
+                      AND t2.status = 'actual'
+                      AND dp.is_planned = FALSE   -- <-- ТОЛЬКО ФАКТ
                 ), 0) as distributed_paid
             FROM debts d
             LEFT JOIN transactions t ON t.debt_id = d.id
@@ -50,12 +52,19 @@ class Debt extends Model {
             $paidMap[$row['id']] = (float)$row['direct_paid'] + (float)$row['distributed_paid'];
         }
 
-        // 3. Считаем ПЛАНОВЫЕ суммы
+        // 3. Считаем ПЛАНОВЫЕ суммы (только is_planned = TRUE)
         $stmtPlanned = $instance->db->prepare("
             SELECT 
                 d.id,
                 COALESCE(SUM(CASE WHEN t.status = 'planned' THEN t.amount ELSE 0 END), 0) as direct_planned,
-                COALESCE((SELECT SUM(dp.amount) FROM debt_payments dp JOIN transactions t2 ON dp.transaction_id = t2.id WHERE dp.debt_id = d.id AND t2.status = 'planned'), 0) as distributed_planned
+                COALESCE((
+                    SELECT SUM(dp.amount) 
+                    FROM debt_payments dp 
+                    JOIN transactions t2 ON dp.transaction_id = t2.id 
+                    WHERE dp.debt_id = d.id 
+                      AND t2.status = 'planned'
+                      AND dp.is_planned = TRUE    -- <-- ТОЛЬКО ПЛАН
+                ), 0) as distributed_planned
             FROM debts d
             LEFT JOIN transactions t ON t.debt_id = d.id
             WHERE d.user_id = :uid
@@ -87,22 +96,20 @@ class Debt extends Model {
                 $sumPrincipal = 0;
                 $sumFee = 0;
                 $sumTotal = 0;
-                $sumPaid = 0;
                 $sumPlanned = 0;
 
                 foreach ($children[$parent['id']] as $child) {
                     $sumPrincipal += (float)$child['principal_amount'];
                     $sumFee += (float)$child['fee_amount'];
                     $sumTotal += (float)$child['total_amount'];
-                    $sumPaid += (float)$child['paid_amount'];
                     $sumPlanned += (float)$child['planned_amount'];
                 }
 
                 $parent['principal_amount'] = $sumPrincipal;
                 $parent['fee_amount'] = $sumFee;
                 $parent['total_amount'] = $sumTotal;
-                $parent['paid_amount'] = $sumPaid;
                 $parent['planned_amount'] = $sumPlanned;
+                // paid_amount у родителя НЕ трогаем — он уже посчитан из его транзакций
             }
             
             $parent['children'] = $children[$parent['id']] ?? [];
@@ -123,6 +130,7 @@ class Debt extends Model {
                 COALESCE(SUM(
                     CASE 
                         WHEN t.status = 'actual' 
+                        AND NOT EXISTS (SELECT 1 FROM debt_payments dp WHERE dp.transaction_id = t.id)
                         AND (t.counterparty IS NULL OR t.counterparty != 'Проценты по кредиту')
                         THEN t.amount 
                         ELSE 0 
@@ -132,7 +140,9 @@ class Debt extends Model {
                     SELECT SUM(dp.amount) 
                     FROM debt_payments dp 
                     JOIN transactions t2 ON dp.transaction_id = t2.id 
-                    WHERE dp.debt_id = :id_inner AND t2.status = 'actual'
+                    WHERE dp.debt_id = :id_inner 
+                      AND t2.status = 'actual'
+                      AND dp.is_planned = FALSE
                 ), 0) as distributed_paid
             FROM transactions t
             WHERE t.debt_id = :id_outer AND t.user_id = :uid_paid
@@ -148,8 +158,22 @@ class Debt extends Model {
         // Считаем ПЛАН по этому долгу
         $stmtPlanned = $instance->db->prepare("
             SELECT 
-                COALESCE(SUM(CASE WHEN t.status = 'planned' THEN t.amount ELSE 0 END), 0) as direct_planned,
-                COALESCE((SELECT SUM(dp.amount) FROM debt_payments dp JOIN transactions t2 ON dp.transaction_id = t2.id WHERE dp.debt_id = :id_inner AND t2.status = 'planned'), 0) as distributed_planned
+                COALESCE(SUM(
+                    CASE 
+                        WHEN t.status = 'planned' 
+                        AND NOT EXISTS (SELECT 1 FROM debt_payments dp WHERE dp.transaction_id = t.id)
+                        THEN t.amount 
+                        ELSE 0 
+                    END
+                ), 0) as direct_planned,
+                COALESCE((
+                    SELECT SUM(dp.amount) 
+                    FROM debt_payments dp 
+                    JOIN transactions t2 ON dp.transaction_id = t2.id 
+                    WHERE dp.debt_id = :id_inner 
+                      AND t2.status = 'planned'
+                      AND dp.is_planned = TRUE
+                ), 0) as distributed_planned
             FROM transactions t
             WHERE t.debt_id = :id_outer AND t.user_id = :uid_planned
         ");
@@ -284,7 +308,8 @@ class Debt extends Model {
                     FROM debt_payments dp 
                     JOIN transactions t2 ON dp.transaction_id = t2.id 
                     WHERE dp.debt_id = d.id 
-                      AND t2.status = 'actual'
+                    AND t2.status = 'actual'
+                    AND dp.is_planned = FALSE
                 ), 0) AS actual_paid
             FROM debts d
             WHERE d.id = :id
@@ -318,6 +343,119 @@ class Debt extends Model {
         // Если это дочерний лист сводного дела — пересчитываем родителя
         if (!empty($row['parent_id'])) {
             self::syncPaidAmount((int)$row['parent_id']);
+        }
+    }
+
+    public static function getDistribution(int $transactionId, int $userId): array {
+        $instance = new static();
+        $pdo = $instance->db;
+
+        // 1. Получаем транзакцию
+        $stmtTx = $pdo->prepare("SELECT * FROM transactions WHERE id = :id AND user_id = :uid");
+        $stmtTx->execute(['id' => $transactionId, 'uid' => $userId]);
+        $tx = $stmtTx->fetch();
+
+        if (!$tx) return ['error' => 'Транзакция не найдена'];
+
+        $debtId = $tx['debt_id'];
+        if (!$debtId) return ['error' => 'Транзакция не привязана к долгу'];
+
+        // 2. Получаем распределение из debt_payments (is_planned = TRUE)
+        $stmtDist = $pdo->prepare("
+            SELECT dp.*, d.name as debt_name 
+            FROM debt_payments dp
+            JOIN debts d ON dp.debt_id = d.id
+            WHERE dp.transaction_id = :tx_id AND dp.is_planned = 1
+        ");
+        $stmtDist->execute(['tx_id' => $transactionId]);
+        $distributions = $stmtDist->fetchAll();
+
+        // Если распределения нет (например, для отдельного листа), создаём "виртуальное"
+        if (empty($distributions)) {
+            $stmtDebt = $pdo->prepare("SELECT * FROM debts WHERE id = :id");
+            $stmtDebt->execute(['id' => $debtId]);
+            $debt = $stmtDebt->fetch();
+
+            if ($debt) {
+                // Проверяем, есть ли у этого долга дети
+                $stmtChildren = $pdo->prepare("SELECT COUNT(*) as cnt FROM debts WHERE parent_id = :id");
+                $stmtChildren->execute(['id' => $debtId]);
+                $hasChildren = $stmtChildren->fetch()['cnt'] > 0;
+
+                if (!$hasChildren) {
+                    // Отдельный лист — вся сумма идёт на него
+                    $distributions[] = [
+                        'debt_id' => $debt['id'],
+                        'debt_name' => $debt['name'],
+                        'amount' => $tx['amount'],
+                        'principal_amount' => 0,
+                        'fee_amount' => $tx['amount'],
+                    ];
+                }
+            }
+        }
+
+        return [
+            'transaction' => $tx,
+            'distributions' => $distributions
+        ];
+    }
+    
+    public static function confirmDistribution(int $transactionId, array $data, int $userId): void {
+        $instance = new static();
+        $pdo = $instance->db;
+
+        $pdo->beginTransaction();
+        try {
+            // 1. Удаляем старые плановые записи
+            $stmtDel = $pdo->prepare("DELETE FROM debt_payments WHERE transaction_id = :tx_id");
+            $stmtDel->execute(['tx_id' => $transactionId]);
+
+            // 2. Создаём новые фактические и пишем историю
+            $stmtIns = $pdo->prepare("
+                INSERT INTO debt_payments (transaction_id, debt_id, amount, principal_amount, fee_amount, is_planned) 
+                VALUES (:tx_id, :debt_id, :amount, :principal, :fee, 0)
+            ");
+            $stmtHist = $pdo->prepare("
+                INSERT INTO debt_payment_history (transaction_id, debt_id, principal_amount, fee_amount, changed_by) 
+                VALUES (:tx_id, :debt_id, :principal, :fee, :user_id)
+            ");
+
+            foreach ($data as $row) {
+                $amount = (float)$row['principal'] + (float)$row['fee'];
+                
+                $stmtIns->execute([
+                    'tx_id' => $transactionId,
+                    'debt_id' => $row['debt_id'],
+                    'amount' => $amount,
+                    'principal' => $row['principal'],
+                    'fee' => $row['fee']
+                ]);
+
+                $stmtHist->execute([
+                    'tx_id' => $transactionId,
+                    'debt_id' => $row['debt_id'],
+                    'principal' => $row['principal'],
+                    'fee' => $row['fee'],
+                    'user_id' => $userId
+                ]);
+            }
+
+            // 3. Ставим статус confirmed
+            $stmtUpd = $pdo->prepare("UPDATE transactions SET debt_payment_status = 'confirmed' WHERE id = :id");
+            $stmtUpd->execute(['id' => $transactionId]);
+
+            // 4. Пересчитываем paid_amount у затронутых долгов
+            $stmtDebts = $pdo->prepare("SELECT DISTINCT debt_id FROM debt_payments WHERE transaction_id = :tx_id");
+            $stmtDebts->execute(['tx_id' => $transactionId]);
+            foreach ($stmtDebts->fetchAll() as $row) {
+                self::syncPaidAmount((int)$row['debt_id']);
+            }
+
+            $pdo->commit();
+        } catch (\Exception $e) {
+            $pdo->rollBack();
+            throw $e;
         }
     }
 }
