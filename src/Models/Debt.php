@@ -362,7 +362,13 @@ class Debt extends Model {
 
         // 2. Получаем распределение из debt_payments (is_planned = TRUE)
         $stmtDist = $pdo->prepare("
-            SELECT dp.*, d.name as debt_name 
+            SELECT 
+                dp.*, 
+                d.name as debt_name, 
+                d.type as debt_type,
+                d.principal_amount as debt_principal, 
+                d.fee_amount as debt_fee,
+                d.interest_category_id
             FROM debt_payments dp
             JOIN debts d ON dp.debt_id = d.id
             WHERE dp.transaction_id = :tx_id AND dp.is_planned = 1
@@ -370,26 +376,38 @@ class Debt extends Model {
         $stmtDist->execute(['tx_id' => $transactionId]);
         $distributions = $stmtDist->fetchAll();
 
-        // Если распределения нет (например, для отдельного листа), создаём "виртуальное"
+        // Если распределения нет — создаём "виртуальное"
         if (empty($distributions)) {
             $stmtDebt = $pdo->prepare("SELECT * FROM debts WHERE id = :id");
             $stmtDebt->execute(['id' => $debtId]);
             $debt = $stmtDebt->fetch();
 
             if ($debt) {
-                // Проверяем, есть ли у этого долга дети
-                $stmtChildren = $pdo->prepare("SELECT COUNT(*) as cnt FROM debts WHERE parent_id = :id");
-                $stmtChildren->execute(['id' => $debtId]);
-                $hasChildren = $stmtChildren->fetch()['cnt'] > 0;
-
-                if (!$hasChildren) {
-                    // Отдельный лист — вся сумма идёт на него
+                if ($debt['type'] === 'credit_card' || $debt['type'] === 'loan') {
+                    // Для кредиток/кредитов: вся сумма в тело, проценты = 0
                     $distributions[] = [
                         'debt_id' => $debt['id'],
                         'debt_name' => $debt['name'],
+                        'debt_type' => $debt['type'],
+                        'amount' => $tx['amount'],
+                        'principal_amount' => (float)$tx['amount'], // <-- ВСЯ СУММА В ТЕЛО
+                        'fee_amount' => 0,                          // <-- ПРОЦЕНТЫ = 0
+                        'debt_principal' => $debt['principal_amount'],
+                        'debt_fee' => $debt['fee_amount'],
+                        'interest_category_id' => $debt['interest_category_id']
+                    ];
+                } else {
+                    // Для исполнительных листов (без детей) — вся сумма в сбор
+                    $distributions[] = [
+                        'debt_id' => $debt['id'],
+                        'debt_name' => $debt['name'],
+                        'debt_type' => $debt['type'],
                         'amount' => $tx['amount'],
                         'principal_amount' => 0,
-                        'fee_amount' => $tx['amount'],
+                        'fee_amount' => (float)$tx['amount'],
+                        'debt_principal' => $debt['principal_amount'],
+                        'debt_fee' => $debt['fee_amount'],
+                        'interest_category_id' => $debt['interest_category_id']
                     ];
                 }
             }
@@ -405,40 +423,110 @@ class Debt extends Model {
         $instance = new static();
         $pdo = $instance->db;
 
+        // 1. Получаем транзакцию
+        $stmtTx = $pdo->prepare("SELECT * FROM transactions WHERE id = :id AND user_id = :uid");
+        $stmtTx->execute(['id' => $transactionId, 'uid' => $userId]);
+        $tx = $stmtTx->fetch();
+
+        if (!$tx) throw new \Exception('Транзакция не найдена');
+
+        $debtId = $tx['debt_id'];
+        if (!$debtId) throw new \Exception('Транзакция не привязана к долгу');
+
+        // 2. Получаем долг
+        $stmtDebt = $pdo->prepare("SELECT * FROM debts WHERE id = :id");
+        $stmtDebt->execute(['id' => $debtId]);
+        $debt = $stmtDebt->fetch();
+
+        if (!$debt) throw new \Exception('Долг не найден');
+
         $pdo->beginTransaction();
         try {
-            // 1. Удаляем старые плановые записи
-            $stmtDel = $pdo->prepare("DELETE FROM debt_payments WHERE transaction_id = :tx_id");
-            $stmtDel->execute(['tx_id' => $transactionId]);
+            // ==========================================
+            // КРЕДИТКА / КРЕДИТ
+            // ==========================================
+            if ($debt['type'] === 'credit_card' || $debt['type'] === 'loan') {
+                $principal = (float)$data[0]['principal'];
+                $fee = (float)$data[0]['fee'];
 
-            // 2. Создаём новые фактические и пишем историю
-            $stmtIns = $pdo->prepare("
-                INSERT INTO debt_payments (transaction_id, debt_id, amount, principal_amount, fee_amount, is_planned) 
-                VALUES (:tx_id, :debt_id, :amount, :principal, :fee, 0)
-            ");
-            $stmtHist = $pdo->prepare("
-                INSERT INTO debt_payment_history (transaction_id, debt_id, principal_amount, fee_amount, changed_by) 
-                VALUES (:tx_id, :debt_id, :principal, :fee, :user_id)
-            ");
+                // 1. Уменьшаем тело долга
+                if ($principal > 0) {
+                    self::reducePrincipal($debtId, $principal);
+                }
 
-            foreach ($data as $row) {
-                $amount = (float)$row['principal'] + (float)$row['fee'];
-                
-                $stmtIns->execute([
-                    'tx_id' => $transactionId,
-                    'debt_id' => $row['debt_id'],
-                    'amount' => $amount,
-                    'principal' => $row['principal'],
-                    'fee' => $row['fee']
-                ]);
+                // 2. Создаём транзакцию на проценты (если есть)
+                if ($fee > 0 && $debt['interest_category_id']) {
+                    $interestData = [
+                        'account_id' => $tx['account_id'],
+                        'debt_id' => $debtId,
+                        'type' => 'expense',
+                        'amount' => $fee,
+                        'counterparty' => 'Проценты по кредиту',
+                        'transaction_date' => $tx['transaction_date'],
+                        'has_details' => 0,
+                        'status' => $tx['status'],
+                        'debt_payment_status' => 'confirmed',
+                        'items' => [[
+                            'name' => 'Проценты',
+                            'category_id' => $debt['interest_category_id'],
+                            'quantity' => 1,
+                            'unit_price' => $fee,
+                            'total_price' => $fee
+                        ]]
+                    ];
+                    Transaction::createFull($interestData, $userId);
+                }
 
+                // 3. Пишем историю
+                $stmtHist = $pdo->prepare("
+                    INSERT INTO debt_payment_history (transaction_id, debt_id, principal_amount, fee_amount, changed_by) 
+                    VALUES (:tx_id, :debt_id, :principal, :fee, :user_id)
+                ");
                 $stmtHist->execute([
                     'tx_id' => $transactionId,
-                    'debt_id' => $row['debt_id'],
-                    'principal' => $row['principal'],
-                    'fee' => $row['fee'],
+                    'debt_id' => $debtId,
+                    'principal' => $principal,
+                    'fee' => $fee,
                     'user_id' => $userId
                 ]);
+            }
+            // ==========================================
+            // ИСПОЛНИТЕЛЬНЫЕ ЛИСТЫ (СВОДНОЕ ДЕЛО)
+            // ==========================================
+            else {
+                // 1. Удаляем старые плановые записи
+                $stmtDel = $pdo->prepare("DELETE FROM debt_payments WHERE transaction_id = :tx_id AND is_planned = 1");
+                $stmtDel->execute(['tx_id' => $transactionId]);
+
+                // 2. Создаём новые фактические и пишем историю
+                $stmtIns = $pdo->prepare("
+                    INSERT INTO debt_payments (transaction_id, debt_id, amount, principal_amount, fee_amount, is_planned) 
+                    VALUES (:tx_id, :debt_id, :amount, :principal, :fee, 0)
+                ");
+                $stmtHist = $pdo->prepare("
+                    INSERT INTO debt_payment_history (transaction_id, debt_id, principal_amount, fee_amount, changed_by) 
+                    VALUES (:tx_id, :debt_id, :principal, :fee, :user_id)
+                ");
+
+                foreach ($data as $row) {
+                    $amount = (float)$row['principal'] + (float)$row['fee'];
+                    
+                    $stmtIns->execute([
+                        'tx_id' => $transactionId,
+                        'debt_id' => $row['debt_id'],
+                        'amount' => $amount,
+                        'principal' => $row['principal'],
+                        'fee' => $row['fee']
+                    ]);
+
+                    $stmtHist->execute([
+                        'tx_id' => $transactionId,
+                        'debt_id' => $row['debt_id'],
+                        'principal' => $row['principal'],
+                        'fee' => $row['fee'],
+                        'user_id' => $userId
+                    ]);
+                }
             }
 
             // 3. Ставим статус confirmed
@@ -450,6 +538,11 @@ class Debt extends Model {
             $stmtDebts->execute(['tx_id' => $transactionId]);
             foreach ($stmtDebts->fetchAll() as $row) {
                 self::syncPaidAmount((int)$row['debt_id']);
+            }
+
+            // 5. Для кредиток тоже синхронизируем paid_amount
+            if ($debt['type'] === 'credit_card' || $debt['type'] === 'loan') {
+                self::syncPaidAmount($debtId);
             }
 
             $pdo->commit();

@@ -359,17 +359,6 @@ export class TransactionDetailView {
                         <input type="time" id="edit-time" value="${timeStr}" required style="margin-bottom: 0;">
                     </div>
                 </div>
-
-                <!-- Блок для ввода процентов (если транзакция привязана к долгу) -->
-                ${tx.debt_id && (tx.debt_type === 'credit_card' || tx.debt_type === 'loan') ? `
-                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.1);">
-                        <label class="col-muted" style="font-size: 0.85em;">Из них проценты (Услуги банка)</label>
-                        <input type="number" id="edit-interest" value="0" step="0.01" style="margin-bottom: 0;">
-                        <div style="font-size: 0.8em; color: var(--text-muted); margin-top: 3px;">
-                            Эта сумма уйдет на проценты, остальное — на погашение тела долга.
-                        </div>
-                    </div>
-                ` : ''}
                 
                 <button type="submit" style="margin-top: 15px; width: 100%;">Сохранить</button>
             </form>
@@ -388,7 +377,7 @@ export class TransactionDetailView {
                     transaction_date: document.getElementById('edit-date').value,
                     transaction_time: document.getElementById('edit-time').value,
                     status: document.getElementById('edit-status').value,
-                    interest_amount: interestAmount // <-- Передаем сумму процентов
+                    //interest_amount: interestAmount // <-- Передаем сумму процентов
                 });
                 modal.close();
                 showStatus('Операция обновлена', 'success');

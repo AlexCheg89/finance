@@ -166,9 +166,9 @@ class TransactionController extends Controller {
             Transaction::updateTransaction($id, $data, $user['id']);
 
             // 2. Создаем отдельную транзакцию на проценты и уменьшаем остаток долга
-            if ($interestAmount > 0 && $tx['debt_id']) {
-                $this->handleInterest($user['id'], $tx, $data, $interestAmount);
-            }
+            // if ($interestAmount > 0 && $tx['debt_id']) {
+            //     $this->handleInterest($user['id'], $tx, $data, $interestAmount);
+            // }
 
             // 3. Пересчет обязательств (если это доход и статус стал actual)
             $newStatus = $data['status'] ?? $tx['status'];

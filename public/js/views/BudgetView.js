@@ -241,9 +241,13 @@ export class BudgetView {
                     <label class="col-muted" style="font-size: 0.85em;">Выберите долг</label>
                     <select id="plan-debt">
                         <option value="">-- Выберите --</option>
-                        ${debts.filter(d => !d.parent_id).map(d => 
-                            `<option value="${d.id}">${d.name} (остаток: ${formatMoney(d.total_amount - d.paid_amount, 'RUB')})</option>`
-                        ).join('')}
+                        ${debts.filter(d => !d.parent_id).map(d => {
+                            const factRemaining = parseFloat(d.total_amount) - parseFloat(d.paid_amount || 0);
+                            const planRemaining = factRemaining - parseFloat(d.planned_amount || 0);
+                            return `<option value="${d.id}">
+                                ${d.name} (факт: ${formatMoney(factRemaining, 'RUB')}, план: ${formatMoney(planRemaining, 'RUB')})
+                            </option>`;
+                        }).join('')}
                     </select>
                 </div>
                 

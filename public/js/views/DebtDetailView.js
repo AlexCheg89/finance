@@ -143,102 +143,124 @@ export class DebtDetailView {
     }
 
     async openDistributionModal(txId) {
-        try {
-            const res = await api.get(`/debts/distribution/${txId}`);
-            const { transaction, distributions } = res;
+        const res = await api.get(`/debts/distribution/${txId}`);
+        const { transaction, distributions } = res;
 
-            if (!distributions || distributions.length === 0) {
-                showErrorModal('Нет данных для распределения');
-                return;
-            }
+        if (res.error) {
+            showErrorModal(res.error);
+            return;
+        }
 
-            // Формируем строки таблицы
-            let rowsHTML = distributions.map((d, idx) => `
+        const debtType = distributions[0]?.debt_type || 'enforcement';
+        const isCredit = (debtType === 'credit_card' || debtType === 'loan');
+        const totalAmount = parseFloat(transaction.amount);
+
+        const principalLabel = 'Основной долг';
+        const feeLabel = isCredit ? 'Проценты' : 'Исполнительский сбор';
+
+        let rowsHTML = '';
+
+        if (isCredit) {
+            // Для кредитки — одна строка с двумя полями
+            const d = distributions[0];
+            rowsHTML = `
                 <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.05);">${d.debt_name}</td>
-                    <td style="padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                        <input type="number" class="dist-principal" data-debt="${d.debt_id}" value="${parseFloat(d.principal_amount || 0).toFixed(2)}" step="0.01" style="width: 100%; margin-bottom: 0;">
+                    <td style="padding: 8px;">${d.debt_name}</td>
+                    <td style="padding: 8px;">
+                        <input type="number" id="dist-principal-0" data-debt="${d.debt_id}" value="${parseFloat(d.principal_amount) || 0}" step="0.01" style="width: 100%;">
                     </td>
-                    <td style="padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.05);">
-                        <input type="number" class="dist-fee" data-debt="${d.debt_id}" value="${parseFloat(d.fee_amount || 0).toFixed(2)}" step="0.01" style="width: 100%; margin-bottom: 0;">
+                    <td style="padding: 8px;">
+                        <input type="number" id="dist-fee-0" data-debt="${d.debt_id}" value="${parseFloat(d.fee_amount) || 0}" step="0.01" style="width: 100%;">
+                    </td>
+                </tr>
+            `;
+        } else {
+            // Для сводного дела — несколько строк
+            rowsHTML = distributions.map(d => `
+                <tr>
+                    <td style="padding: 8px;">${d.debt_name}</td>
+                    <td style="padding: 8px;">
+                        <input type="number" class="dist-principal" data-debt="${d.debt_id}" value="${parseFloat(d.principal_amount) || 0}" step="0.01" style="width: 100%;">
+                    </td>
+                    <td style="padding: 8px;">
+                        <input type="number" class="dist-fee" data-debt="${d.debt_id}" value="${parseFloat(d.fee_amount) || 0}" step="0.01" style="width: 100%;">
                     </td>
                 </tr>
             `).join('');
-
-            const totalPrincipal = distributions.reduce((sum, d) => sum + parseFloat(d.principal_amount || 0), 0);
-            const totalFee = distributions.reduce((sum, d) => sum + parseFloat(d.fee_amount || 0), 0);
-
-            const modal = new Modal('Сверить распределение', `
-                <p style="margin-bottom: 10px;">Сумма платежа: <strong>${formatMoney(transaction.amount, 'RUB')}</strong></p>
-                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
-                    <thead>
-                        <tr style="background: rgba(0,0,0,0.05);">
-                            <th style="padding: 8px; text-align: left;">Лист</th>
-                            <th style="padding: 8px; text-align: left;">Основной долг</th>
-                            <th style="padding: 8px; text-align: left;">Исполнительский сбор</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rowsHTML}</tbody>
-                    <tfoot>
-                        <tr style="font-weight: bold; background: rgba(0,0,0,0.02);">
-                            <td style="padding: 8px;">Итого:</td>
-                            <td style="padding: 8px;" id="total-principal">${formatMoney(totalPrincipal, 'RUB')}</td>
-                            <td style="padding: 8px;" id="total-fee">${formatMoney(totalFee, 'RUB')}</td>
-                        </tr>
-                    </tfoot>
-                </table>
-                <div style="margin-top: 10px; font-size: 0.85em; color: var(--text-muted);">
-                    Проверьте суммы. Если пристав распределил иначе — исправьте.
-                </div>
-                <button id="confirm-dist-btn" style="margin-top: 15px; width: 100%;">Подтвердить распределение</button>
-            `);
-            modal.open();
-
-            // Пересчёт итогов при изменении полей
-            const updateTotals = () => {
-                let tp = 0, tf = 0;
-                document.querySelectorAll('.dist-principal').forEach(inp => tp += parseFloat(inp.value) || 0);
-                document.querySelectorAll('.dist-fee').forEach(inp => tf += parseFloat(inp.value) || 0);
-                document.getElementById('total-principal').textContent = formatMoney(tp, 'RUB');
-                document.getElementById('total-fee').textContent = formatMoney(tf, 'RUB');
-            };
-
-            document.querySelectorAll('.dist-principal, .dist-fee').forEach(inp => {
-                inp.addEventListener('input', updateTotals);
-            });
-
-            // Обработчик подтверждения
-            document.getElementById('confirm-dist-btn').addEventListener('click', async () => {
-                const distributionsData = [];
-                document.querySelectorAll('.dist-principal').forEach(inp => {
-                    const debtId = parseInt(inp.dataset.debt);
-                    const principal = parseFloat(inp.value) || 0;
-                    const feeInput = document.querySelector(`.dist-fee[data-debt="${debtId}"]`);
-                    const fee = parseFloat(feeInput.value) || 0;
-                    
-                    distributionsData.push({ 
-                        debt_id: debtId, 
-                        principal: principal, 
-                        fee: fee 
-                    });
-                });
-
-                try {
-                    await api.post(`/debts/confirm-distribution/${txId}`, { distributions: distributionsData });
-                    modal.close();
-                    showStatus('Распределение подтверждено', 'success');
-                    
-                    // Перезагружаем страницу
-                    const res = await api.get(`/debts/${this.debtId}`);
-                    this.debt = res.debt;
-                    this.render(container);
-                } catch (err) {
-                    showErrorModal(err.message);
-                }
-            });
-
-        } catch (err) {
-            showErrorModal(err.message);
         }
+
+        const modal = new Modal('Сверить распределение', `
+            <p>Сумма платежа: <strong>${formatMoney(totalAmount, 'RUB')}</strong></p>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                <thead>
+                    <tr style="background: rgba(0,0,0,0.05);">
+                        <th style="padding: 8px; text-align: left;">Лист</th>
+                        <th style="padding: 8px; text-align: left;">${principalLabel}</th>
+                        <th style="padding: 8px; text-align: left;">${feeLabel}</th>
+                    </tr>
+                </thead>
+                <tbody>${rowsHTML}</tbody>
+            </table>
+            <p style="font-size: 0.85em; color: var(--text-muted); margin-top: 10px;">
+                Проверьте суммы. Если банк/пристав распределил иначе — исправьте.
+            </p>
+            <button id="confirm-dist-btn" style="margin-top: 15px; width: 100%;">Подтвердить распределение</button>
+        `);
+        modal.open();
+
+        // --- ЛОГИКА «СООБЩАЮЩИХСЯ СОСУДОВ» для кредиток ---
+        if (isCredit) {
+            const principalInput = document.getElementById('dist-principal-0');
+            const feeInput = document.getElementById('dist-fee-0');
+
+            principalInput.addEventListener('input', () => {
+                const principal = parseFloat(principalInput.value) || 0;
+                const fee = Math.max(0, totalAmount - principal);
+                feeInput.value = fee.toFixed(2);
+            });
+
+            feeInput.addEventListener('input', () => {
+                const fee = parseFloat(feeInput.value) || 0;
+                const principal = Math.max(0, totalAmount - fee);
+                principalInput.value = principal.toFixed(2);
+            });
+        }
+
+        // --- ОТПРАВКА ---
+        document.getElementById('confirm-dist-btn').addEventListener('click', async () => {
+            let distributionsData = [];
+
+            if (isCredit) {
+                const principal = parseFloat(document.getElementById('dist-principal-0').value) || 0;
+                const fee = parseFloat(document.getElementById('dist-fee-0').value) || 0;
+                
+                if (Math.abs((principal + fee) - totalAmount) > 0.01) {
+                    showErrorModal('Сумма долга и процентов должна равняться сумме платежа');
+                    return;
+                }
+
+                distributionsData.push({
+                    debt_id: parseInt(document.getElementById('dist-principal-0').dataset.debt),
+                    principal: principal,
+                    fee: fee
+                });
+            } else {
+                document.querySelectorAll('.dist-principal').forEach(inp => {
+                    const debtId = inp.dataset.debt;
+                    const principal = parseFloat(inp.value) || 0;
+                    const fee = parseFloat(document.querySelector(`.dist-fee[data-debt="${debtId}"]`).value) || 0;
+                    distributionsData.push({ debt_id: debtId, principal, fee });
+                });
+            }
+
+            try {
+                await api.post(`/debts/confirm-distribution/${txId}`, { distributions: distributionsData });
+                modal.close();
+                showStatus('Распределение подтверждено', 'success');
+                this.mount(this.container);
+            } catch (err) {
+                showErrorModal(err.message);
+            }
+        });
     }
 }
