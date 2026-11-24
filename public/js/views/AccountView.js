@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { formatMoney } from '../utils/format.js';
 import { showStatus, showErrorModal } from '../utils/status.js';
+import { Modal } from  '../components/Modal.js';
 
 export class AccountView {
     constructor() {
@@ -8,6 +9,7 @@ export class AccountView {
     }
 
     async mount(container) {
+        this.container = container;
         const hash = window.location.hash.replace('#', '');
         const accountId = hash.split('/')[2];
 
@@ -21,7 +23,7 @@ export class AccountView {
             showErrorModal(err.message);
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/accounts' }));
         }
-    }
+    }    
 
     render(container) {
         const acc = this.account;
@@ -94,7 +96,7 @@ export class AccountView {
                         const dateStr = dateObj.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' + dateObj.toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'});
 
                         return `
-                            <div style="display: grid; grid-template-columns: 80px 1fr 120px 140px; gap: 10px; padding: 10px 15px; border-bottom: 1px solid rgba(0,0,0,0.05); align-items: center; font-size: 0.95em; ${rowStyle}">
+                            <div class="tx-row-account" data-id="${tx.id}" style="display: grid; grid-template-columns: 80px 1fr 120px 140px; gap: 10px; padding: 10px 15px; border-bottom: 1px solid rgba(0,0,0,0.05); align-items: center; cursor: pointer; font-size: 0.95em; ${rowStyle}">
                                 <div style="color: var(--text-muted);">${dateStr}</div>
                                 <div>
                                     <div style="font-weight: 500;">${tx.items_names ? tx.items_names : (tx.counterparty || 'Без описания')} ${plannedBadge}</div>
@@ -111,6 +113,14 @@ export class AccountView {
                 </div>
             </div>
         `;
+
+        // Обработчик клика по транзакции
+        document.querySelectorAll('.tx-row-account').forEach(row => {
+            row.addEventListener('click', () => {
+                const txId = row.dataset.id;
+                this.openEditModal(txId);
+            });
+        });
 
         document.getElementById('back-btn').addEventListener('click', () => {
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/accounts' }));
@@ -138,5 +148,71 @@ export class AccountView {
                 showErrorModal(err.message);
             }
         });
+    }
+
+    async openEditModal(txId) {
+        try {
+            const res = await api.get(`/transactions/${txId}`);
+            const tx = res.transaction;
+
+            if (!tx) {
+                showErrorModal('Транзакция не найдена');
+                return;
+            }
+
+            const dateObj = new Date(tx.transaction_date.replace(' ', 'T'));
+            const dateStr = dateObj.toISOString().split('T')[0];
+            const timeStr = dateObj.toTimeString().slice(0, 5);
+
+            const modal = new Modal('Редактировать операцию', `
+                <form id="edit-tx-form-account">
+                    <label class="col-muted" style="font-size: 0.85em;">Статус</label>
+                    <select id="edit-status-account">
+                        <option value="actual" ${tx.status === 'actual' ? 'selected' : ''}>Факт</option>
+                        <option value="planned" ${tx.status === 'planned' ? 'selected' : ''}>План</option>
+                    </select>
+
+                    <label class="col-muted" style="font-size: 0.85em;">Сумма</label>
+                    <input type="number" id="edit-amount-account" value="${tx.amount}" step="0.01" required>
+                    
+                    <label class="col-muted" style="font-size: 0.85em;">Контрагент</label>
+                    <input type="text" id="edit-counterparty-account" value="${tx.counterparty || ''}">
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 2;">
+                            <label class="col-muted" style="font-size: 0.85em;">Дата</label>
+                            <input type="date" id="edit-date-account" value="${dateStr}" required style="margin-bottom: 0;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="col-muted" style="font-size: 0.85em;">Время</label>
+                            <input type="time" id="edit-time-account" value="${timeStr}" required style="margin-bottom: 0;">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" style="margin-top: 15px; width: 100%;">Сохранить</button>
+                </form>
+            `);
+            modal.open();
+
+            document.getElementById('edit-tx-form-account').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                try {
+                    await api.put(`/transactions/${txId}`, {
+                        amount: parseFloat(document.getElementById('edit-amount-account').value),
+                        counterparty: document.getElementById('edit-counterparty-account').value,
+                        transaction_date: document.getElementById('edit-date-account').value,
+                        transaction_time: document.getElementById('edit-time-account').value,
+                        status: document.getElementById('edit-status-account').value
+                    });
+                    modal.close();
+                    showStatus('Транзакция обновлена', 'success');
+                    this.mount(this.container); // Перезагружаем страницу
+                } catch (err) {
+                    showErrorModal(err.message);
+                }
+            });
+        } catch (err) {
+            showErrorModal(err.message);
+        }
     }
 }
