@@ -252,4 +252,27 @@ class TransactionController extends Controller {
         $templates = Transaction::getTemplates($user['id']);
         $this->success(['templates' => $templates]);
     }
+
+    public function destroy(array $params): void {
+        $user = $this->requireAuth();
+        $id = (int)$params['id'];
+        
+        $tx = Transaction::find($id);
+        if (!$tx || $tx['user_id'] !== $user['id']) Response::error('Транзакция не найдена', 404);
+        if (!$this->canEdit($user, $tx)) Response::error('Транзакция сверена', 403);
+
+        $pdo = \App\Database::getConnection();
+        $pdo->beginTransaction();
+        try {
+            // Удаляем транзакцию (каскадно удалятся позиции и debt_payments)
+            $stmt = $pdo->prepare("DELETE FROM transactions WHERE id = :id");
+            $stmt->execute(['id' => $id]);
+            
+            $pdo->commit();
+            $this->success();
+        } catch (\Exception $e) {
+            $pdo->rollBack();
+            Response::error('Ошибка при удалении: ' . $e->getMessage(), 500);
+        }
+    }
 }

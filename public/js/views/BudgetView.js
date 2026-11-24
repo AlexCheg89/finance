@@ -132,7 +132,7 @@ export class BudgetView {
                         }
 
                         return `
-                            <div class="budget-table-row ${tx.is_future ? 'future' : ''}">
+                            <div class="budget-table-row tx-row ${tx.is_future ? 'future' : ''}" data-id="${tx.id}" data-status="${tx.status}" style="cursor: pointer;">
                                 <div class="col-muted">${dateStr}</div>
                                 <div class="col-ellipsis" title="${tx.category_name || ''}">
                                     ${tx.category_name || '-'}
@@ -177,6 +177,21 @@ export class BudgetView {
             `;
 
             content.innerHTML = headerHTML + tableHTML;
+
+            // Обработчик клика по строке (только для плановых)
+            document.querySelectorAll('.tx-row').forEach(row => {
+                row.addEventListener('click', (e) => {
+                    // Не реагируем на клики по ссылкам (сверка)
+                    if (e.target.closest('a')) return;
+                    
+                    const txId = row.dataset.id;
+                    const status = row.dataset.status;
+                    
+                    if (status === 'planned') {
+                        this.openEditPlanModal(txId);
+                    }
+                });
+            });
             
         } catch (err) {
             showErrorModal(err.message);
@@ -334,6 +349,101 @@ export class BudgetView {
                 showErrorModal(err.message);
             }
         });
+    }
+
+    async openEditPlanModal(txId) {
+        try {
+            // Загружаем транзакцию
+            const res = await api.get(`/transactions/${txId}`);
+            const tx = res.transaction;
+
+            if (!tx) {
+                showErrorModal('Транзакция не найдена');
+                return;
+            }
+
+            // Загружаем счета (если нужно)
+            const accRes = await api.get('/accounts');
+            const accounts = accRes.accounts;
+
+            const accountOptions = accounts.map(acc => 
+                `<option value="${acc.id}" ${tx.account_id === acc.id ? 'selected' : ''}>${acc.name}</option>`
+            ).join('');
+
+            // Форматируем дату и время
+            const dateObj = new Date(tx.transaction_date.replace(' ', 'T'));
+            const dateStr = dateObj.toISOString().split('T')[0];
+            const timeStr = dateObj.toTimeString().slice(0, 5);
+
+            const modal = new Modal('Редактировать план', `
+                <form id="edit-plan-form">
+                    <label class="col-muted" style="font-size: 0.85em;">Счет</label>
+                    <select id="edit-plan-account">
+                        ${accountOptions}
+                    </select>
+
+                    <label class="col-muted" style="font-size: 0.85em;">Сумма</label>
+                    <input type="number" id="edit-plan-amount" value="${tx.amount}" step="0.01" required>
+                    
+                    <label class="col-muted" style="font-size: 0.85em;">Контрагент</label>
+                    <input type="text" id="edit-plan-counterparty" value="${tx.counterparty || ''}">
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <div style="flex: 2;">
+                            <label class="col-muted" style="font-size: 0.85em;">Дата</label>
+                            <input type="date" id="edit-plan-date" value="${dateStr}" required style="margin-bottom: 0;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label class="col-muted" style="font-size: 0.85em;">Время</label>
+                            <input type="time" id="edit-plan-time" value="${timeStr}" required style="margin-bottom: 0;">
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 15px; display: flex; gap: 10px;">
+                        <button type="submit" style="flex: 1;">Сохранить</button>
+                        <button type="button" id="delete-plan-btn" style="flex: 1; background: var(--danger);">Удалить</button>
+                    </div>
+                </form>
+            `);
+            modal.open();
+
+            // Обработчик сохранения
+            document.getElementById('edit-plan-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                try {
+                    await api.put(`/transactions/${txId}`, {
+                        account_id: parseInt(document.getElementById('edit-plan-account').value),
+                        amount: parseFloat(document.getElementById('edit-plan-amount').value),
+                        counterparty: document.getElementById('edit-plan-counterparty').value,
+                        transaction_date: document.getElementById('edit-plan-date').value,
+                        transaction_time: document.getElementById('edit-plan-time').value,
+                        status: 'planned' // Оставляем планом
+                    });
+                    modal.close();
+                    showStatus('План обновлён', 'success');
+                    this.loadBudget(document.getElementById('month-picker').value);
+                } catch (err) {
+                    showErrorModal(err.message);
+                }
+            });
+
+            // Обработчик удаления
+            document.getElementById('delete-plan-btn').addEventListener('click', async () => {
+                if (!confirm('Удалить эту плановую операцию?')) return;
+                try {
+                    // Нужен метод DELETE /api/transactions/{id}
+                    await api.delete(`/transactions/${txId}`);
+                    modal.close();
+                    showStatus('План удалён', 'success');
+                    this.loadBudget(document.getElementById('month-picker').value);
+                } catch (err) {
+                    showErrorModal(err.message);
+                }
+            });
+
+        } catch (err) {
+            showErrorModal(err.message);
+        }
     }
 
     async closeMonth(month) {

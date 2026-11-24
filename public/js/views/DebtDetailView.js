@@ -156,7 +156,7 @@ export class DebtDetailView {
         const totalAmount = parseFloat(transaction.amount);
 
         const principalLabel = 'Основной долг';
-        const feeLabel = isCredit ? 'Проценты' : 'Исполнительский сбор';
+        const feeLabel = isCredit ? 'Проценты' : 'Исп сбор';
 
         let rowsHTML = '';
 

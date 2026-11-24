@@ -97,19 +97,21 @@ class Debt extends Model {
                 $sumFee = 0;
                 $sumTotal = 0;
                 $sumPlanned = 0;
+                $sumPaid = 0;
 
                 foreach ($children[$parent['id']] as $child) {
                     $sumPrincipal += (float)$child['principal_amount'];
                     $sumFee += (float)$child['fee_amount'];
                     $sumTotal += (float)$child['total_amount'];
                     $sumPlanned += (float)$child['planned_amount'];
+                    $sumPaid += (float)$child['paid_amount'];
                 }
 
                 $parent['principal_amount'] = $sumPrincipal;
                 $parent['fee_amount'] = $sumFee;
                 $parent['total_amount'] = $sumTotal;
                 $parent['planned_amount'] = $sumPlanned;
-                // paid_amount у родителя НЕ трогаем — он уже посчитан из его транзакций
+                $parent['paid_amount'] = $sumPaid;
             }
             
             $parent['children'] = $children[$parent['id']] ?? [];
@@ -123,6 +125,41 @@ class Debt extends Model {
         $debt = self::find($id);
         
         if (!$debt || $debt['user_id'] !== $userId) return null;
+
+        // Если это родительский долг (сводное дело) — считаем paid_amount как сумму детей
+        if ($debt['parent_id'] === null) {
+            $stmtChildren = $instance->db->prepare("
+                SELECT id FROM debts WHERE parent_id = :id AND user_id = :uid
+            ");
+            $stmtChildren->execute(['id' => $id, 'uid' => $userId]);
+            $children = $stmtChildren->fetchAll();
+
+            if (!empty($children)) {
+                $totalPaid = 0;
+                $totalPlanned = 0;
+                foreach ($children as $child) {
+                    $childData = self::getWithTransactions((int)$child['id'], $userId);
+                    if ($childData) {
+                        $totalPaid += (float)$childData['paid_amount'];
+                        $totalPlanned += (float)$childData['planned_amount'];
+                    }
+                }
+                $debt['paid_amount'] = $totalPaid;
+                $debt['planned_amount'] = $totalPlanned;
+
+                // Получаем транзакции для родителя (как обычно)
+                $stmt = $instance->db->prepare("
+                    SELECT * FROM transactions 
+                    WHERE debt_id = :debt_id 
+                    AND user_id = :uid
+                    ORDER BY transaction_date ASC
+                ");
+                $stmt->execute(['debt_id' => $id, 'uid' => $userId]);
+                $debt['transactions'] = $stmt->fetchAll();
+
+                return $debt;
+            }
+        }
 
         // Считаем ФАКТ по этому долгу
         $stmtPaid = $instance->db->prepare("
