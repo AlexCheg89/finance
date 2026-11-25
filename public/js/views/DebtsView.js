@@ -139,6 +139,10 @@ export class DebtsView {
                                         #e5e7eb 100%
                                     );"></div>
                                 </div>
+                                <div style="display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-muted); margin-top: 4px;">
+                                    <span>Выплачено: ${formatMoney(childPaid, 'RUB')}</span>
+                                    <span>Остаток: ${formatMoney(childTotal - childPaid, 'RUB')}</span>
+                                </div>
                             </div>
                         `;
                     });

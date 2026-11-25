@@ -205,6 +205,13 @@ export class DebtDetailView {
                 Проверьте суммы. Если банк/пристав распределил иначе — исправьте.
             </p>
             <button id="confirm-dist-btn" style="margin-top: 15px; width: 100%;">Подтвердить распределение</button>
+            <div style="display: flex; gap: 10px; margin-top:15px;">
+                ${transaction.status === 'planned' ? `
+                        <button id="edit-tx-btn" style="flex 1; background: #6c757d;">Редактировать</button>
+                    ` : ''}
+                
+                <button id="delete-tx-btn" style="flex 1; background: var(--danger);">Удалить</button>
+            </div>
         `);
         modal.open();
 
@@ -257,6 +264,22 @@ export class DebtDetailView {
                 await api.post(`/debts/confirm-distribution/${txId}`, { distributions: distributionsData });
                 modal.close();
                 showStatus('Распределение подтверждено', 'success');
+                this.mount(this.container);
+            } catch (err) {
+                showErrorModal(err.message);
+            }
+        });
+
+        document.getElementById('edit-tx-btn').addEventListener('click', async () => {
+            modal.close();
+            window.dispatchEvent(new CustomEvent('navigate', {detail: `/transaction/${txId}` }));
+        });
+        document.getElementById('delete-tx-btn').addEventListener('click', async () => {
+            if (!confirm('Удалить этот платеж?')) return;
+            try {
+                await api.delete(`/transactions/${txId}`);
+                modal.close();
+                showStatus('Платёж удален', 'success');
                 this.mount(this.container);
             } catch (err) {
                 showErrorModal(err.message);
