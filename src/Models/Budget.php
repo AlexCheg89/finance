@@ -95,6 +95,11 @@ class Budget {
         foreach ($transactions as $tx) {
             $isFuture = strtotime($tx['transaction_date']) > time() || $tx['status'] === 'planned';
             
+            // Пропускаем переводы — они не влияют на общий баланс
+            if ($tx['transfer_peer_id'] !== null) {
+                continue;
+            }
+
             // Получаем позиции
             $stmtItems = $pdo->prepare("
                 SELECT ti.*, c.name as category_name 

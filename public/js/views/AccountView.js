@@ -56,11 +56,6 @@ export class AccountView {
                         <p style="color: var(--text-muted); font-size: 0.9em;">Начальный баланс</p>
                         <h3>${formatMoney(acc.initial_balance, acc.currency)}</h3>
                     </div>
-                    <div>
-                        <button id="recalc-btn" style="background: #6c757d; width: auto; padding: 8px 15px; font-size: 0.9em;">
-                            &#9881; Пересчитать начальный баланс
-                        </button>
-                    </div>
                 </div>
 
                 <!-- Фильтры -->
@@ -132,21 +127,6 @@ export class AccountView {
                 this.filter = e.target.dataset.filter;
                 this.render(container); // Перерисовываем страницу с новым фильтром
             });
-        });
-
-        // Кнопка пересчета
-        document.getElementById('recalc-btn').addEventListener('click', async () => {
-            if (!confirm('Пересчитать начальный баланс на основе текущего и всех операций?')) return;
-            
-            try {
-                await api.post(`/accounts/${acc.id}/recalculate-balance`);
-                showStatus('Начальный баланс пересчитан', 'success');
-                const res = await api.get(`/accounts/${acc.id}`);
-                this.account = res.account;
-                this.render(container);
-            } catch (err) {
-                showErrorModal(err.message);
-            }
         });
     }
 

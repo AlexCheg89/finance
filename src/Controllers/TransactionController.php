@@ -275,4 +275,68 @@ class TransactionController extends Controller {
             Response::error('Ошибка при удалении: ' . $e->getMessage(), 500);
         }
     }
+
+    public function transfer(): void {
+        $user = $this->requireAuth();
+        $data = json_decode(file_get_contents('php://input'), true);
+
+        $fromAccountId = (int)($data['from_account_id'] ?? 0);
+        $toAccountId = (int)($data['to_account_id'] ?? 0);
+        $amount = (float)($data['amount'] ?? 0);
+        $date = $data['transaction_date'] ?? date('Y-m-d');
+        $time = $data['transaction_time'] ?? date('H:i:s');
+        $datetime = $date . ' ' . $time;
+        $comment = trim($data['comment'] ?? 'Перевод');
+
+        if (!$fromAccountId || !$toAccountId || $fromAccountId === $toAccountId || $amount <= 0) {
+            Response::error('Укажите разные счета и сумму больше нуля', 400);
+        }
+
+        $pdo = \App\Database::getConnection();
+        $pdo->beginTransaction();
+
+        try {
+            // 1. Создаём РАСХОД с первого счета (type = 'expense')
+            $stmtExpense = $pdo->prepare("
+                INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source, has_details, status) 
+                VALUES (:uid, :acc, 'expense', :amount, :counterparty, :date, 'manual', 0, 'actual')
+            ");
+            $stmtExpense->execute([
+                'uid' => $user['id'],
+                'acc' => $fromAccountId,
+                'amount' => $amount,
+                'counterparty' => $comment,
+                'date' => $datetime
+            ]);
+            $expenseId = $pdo->lastInsertId();
+
+            // 2. Создаём ДОХОД на второй счет (type = 'income')
+            $stmtIncome = $pdo->prepare("
+                INSERT INTO transactions (user_id, account_id, type, amount, counterparty, transaction_date, source, has_details, status) 
+                VALUES (:uid, :acc, 'income', :amount, :counterparty, :date, 'manual', 0, 'actual')
+            ");
+            $stmtIncome->execute([
+                'uid' => $user['id'],
+                'acc' => $toAccountId,
+                'amount' => $amount,
+                'counterparty' => $comment,
+                'date' => $datetime
+            ]);
+            $incomeId = $pdo->lastInsertId();
+
+            // 3. Связываем их через transfer_peer_id
+            $pdo->prepare("UPDATE transactions SET transfer_peer_id = :peer WHERE id = :id")->execute(['peer' => $incomeId, 'id' => $expenseId]);
+            $pdo->prepare("UPDATE transactions SET transfer_peer_id = :peer WHERE id = :id")->execute(['peer' => $expenseId, 'id' => $incomeId]);
+
+            // 4. Обновляем балансы
+            $pdo->prepare("UPDATE accounts SET balance = balance - :amount WHERE id = :id")->execute(['amount' => $amount, 'id' => $fromAccountId]);
+            $pdo->prepare("UPDATE accounts SET balance = balance + :amount WHERE id = :id")->execute(['amount' => $amount, 'id' => $toAccountId]);
+
+            $pdo->commit();
+            $this->success(['message' => 'Перевод выполнен']);
+        } catch (\Exception $e) {
+            $pdo->rollBack();
+            Response::error('Ошибка перевода: ' . $e->getMessage(), 500);
+        }
+    }
 }

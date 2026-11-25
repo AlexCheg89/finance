@@ -53,6 +53,7 @@ $router->add('POST', '/api/transactions', function() { (new TransactionControlle
 $router->add('GET', '/api/transactions/templates', function() { (new TransactionController())->templates(); });
 $router->add('GET',  '/api/transactions/{id}', function($p) { (new TransactionController())->show($p); });
 $router->add('PUT',  '/api/transactions/{id}', function($p) { (new TransactionController())->update($p); });
+$router->add('POST', '/api/transactions/transfer', function() { (new TransactionController())->transfer(); });
 
 // Transaction Items
 $router->add('POST',   '/api/transactions/{id}/items', function($p) { (new TransactionController())->addItem($p); });

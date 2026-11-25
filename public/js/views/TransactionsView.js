@@ -95,8 +95,36 @@ export class TransactionsView {
                 return;
             }
 
+            // --- СКЛЕИВАЕМ ПЕРЕВОДЫ ---
+            const processed = [];
+            const transferPairs = new Set();
+
+            res.transactions.forEach(tx => {
+                if (tx.transfer_peer_id) {
+                    const pairId = Math.min(tx.id, tx.transfer_peer_id);
+                    if (transferPairs.has(pairId)) return;
+                    transferPairs.add(pairId);
+
+                    const peer = res.transactions.find(t => t.id === tx.transfer_peer_id);
+                    
+                    const fromAccount = tx.type === 'expense' ? tx.account_name : (peer ? peer.account_name : '?');
+                    const toAccount = tx.type === 'income' ? tx.account_name : (peer ? peer.account_name : '?');
+
+                    processed.push({
+                        ...tx,
+                        isTransfer: true,
+                        fromAccount: fromAccount,
+                        toAccount: toAccount,
+                        displayAmount: tx.amount,
+                        displayDate: tx.transaction_date
+                    });
+                } else {
+                    processed.push(tx);
+                }
+            });
+
             // Группируем по дате
-            const grouped = res.transactions.reduce((acc, tx) => {
+            const grouped = processed.reduce((acc, tx) => {
                 const date = tx.transaction_date.split(' ')[0];
                 if (!acc[date]) acc[date] = [];
                 acc[date].push(tx);
@@ -107,7 +135,7 @@ export class TransactionsView {
 
             for (const [date, txs] of Object.entries(grouped)) {
                 const dayExpenses = txs
-                    .filter(t => t.type === 'expense' && t.status === 'actual')
+                    .filter(t => t.type === 'expense' && t.status === 'actual' && !t.isTransfer)
                     .reduce((sum, t) => sum + parseFloat(t.amount), 0);
                 
                 const [y, m, d] = date.split('-');
@@ -122,7 +150,32 @@ export class TransactionsView {
                 list.appendChild(groupHeader);
 
                 txs.forEach(tx => {
-                    list.appendChild(createTransactionCard(tx));
+                    if (tx.isTransfer) {
+                        // Кастомная карточка для перевода
+                        const card = document.createElement('div');
+                        card.className = 'account-card';
+                        card.style.cssText = 'margin-bottom: 10px; padding: 15px; cursor: default;';
+                        
+                        const dateObj = new Date(tx.transaction_date.replace(' ', 'T'));
+                        const dateStr = dateObj.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) + ' ' + dateObj.toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'});
+
+                        card.innerHTML = `
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong>Перевод</strong>
+                                    <div style="font-size: 0.85em; color: var(--text-muted); margin-top: 4px;">
+                                        ${tx.fromAccount} → ${tx.toAccount} &bull; ${dateStr}
+                                    </div>
+                                </div>
+                                <div style="font-weight: bold; color: var(--primary); font-size: 1.1em;">
+                                    ${formatMoney(tx.displayAmount, 'RUB')}
+                                </div>
+                            </div>
+                        `;
+                        list.appendChild(card);
+                    } else {
+                        list.appendChild(createTransactionCard(tx));
+                    }
                 });
             }
 

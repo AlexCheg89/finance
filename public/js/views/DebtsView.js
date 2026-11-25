@@ -73,12 +73,6 @@ export class DebtsView {
                         <span>Общая сумма долга: ${formatMoney(totalDebt, 'RUB')}</span>
                     </div>
                 </div>
-
-                <div style="margin-bottom: 20px; text-align: right;">
-                    <button id="fix-payments-btn" style="background: #f59e0b; width: auto; padding: 8px 15px;">
-                        &#9881; Распределить старые платежи
-                    </button>
-                </div>
         `;
 
         for (const [catName, debts] of Object.entries(grouped)) {
@@ -170,18 +164,6 @@ export class DebtsView {
                     window.dispatchEvent(new CustomEvent('navigate', { detail: `/debt/${id}` }));
                 }
             });
-        });
-
-        document.getElementById('fix-payments-btn').addEventListener('click', async () => {
-            if (!confirm('Распределить старые платежи по листам? Это действие необратимо.')) return;
-            
-            try {
-                const res = await api.post('/debts/fix-payments');
-                showStatus(res.message, 'success');
-                this.mount(this.container);
-            } catch (err) {
-                showErrorModal(err.message);
-            }
         });
     }
 }
