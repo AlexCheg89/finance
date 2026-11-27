@@ -55,4 +55,13 @@ class DebtController extends Controller {
             Response::error('Ошибка: ' . $e->getMessage(), 500);
         }
     }
+
+    public function schedule(): void {
+        $user = $this->requireAuth();
+        $startMonth = $_GET['start'] ?? date('Y-m');
+        $endMonth = $_GET['end'] ?? date('Y-m', strtotime('+12 months'));
+
+        $data = Debt::getSchedule($user['id'], $startMonth, $endMonth);
+        $this->success(['schedule' => $data]);
+    }
 }

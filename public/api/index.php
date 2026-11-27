@@ -73,6 +73,7 @@ $router->add('GET', '/api/reports/summary', function() { (new ReportController()
 
 // Debts
 $router->add('GET', '/api/debts', function() { (new DebtController())->index(); });
+$router->add('GET', '/api/debts/schedule', function() { (new DebtController())->schedule(); });
 $router->add('GET', '/api/debts/{id}', function($p) { (new DebtController())->show($p); });
 $router->add('POST', '/api/debts/fix-payments', function() { (new DebtController())->fixPayments(); });
 $router->add('GET', '/api/debts/distribution/{transactionId}', function($p) { (new DebtController())->getDistribution($p); });

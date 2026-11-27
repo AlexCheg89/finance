@@ -68,11 +68,12 @@ export class DebtsView {
                         );"></div>
                     </div>
                     
-                    <div style="display: flex; justify-content: space-between; font-size: 0.9em; color: var(--text-muted);">
+                    <div style="margin-bottom: 10px; display: flex; justify-content: space-between; font-size: 0.9em; color: var(--text-muted);">
                         <span>Выплачено: ${formatMoney(totalPaid, 'RUB')}</span>
                         <span>Общая сумма долга: ${formatMoney(totalDebt, 'RUB')}</span>
                     </div>
-                </div>
+                    <button id="go-schedule" style="background: #6c757d;">&#128197; График платежей</button>
+                </div>                
         `;
 
         for (const [catName, debts] of Object.entries(grouped)) {
@@ -161,6 +162,10 @@ export class DebtsView {
             window.dispatchEvent(new CustomEvent('navigate', { detail: '/dashboard' }));
         });
 
+         document.getElementById('go-schedule').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('navigate', { detail: '/debt-schedule' }));
+         });
+
         document.querySelectorAll('.debt-card').forEach(card => {
             card.addEventListener('click', (e) => {
                 if (!e.target.closest('button')) {
@@ -168,6 +173,6 @@ export class DebtsView {
                     window.dispatchEvent(new CustomEvent('navigate', { detail: `/debt/${id}` }));
                 }
             });
-        });
+        });       
     }
 }

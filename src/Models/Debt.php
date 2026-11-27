@@ -594,4 +594,98 @@ class Debt extends Model {
             throw $e;
         }
     }
+
+    public static function getSchedule(int $userId, string $startMonth, string $endMonth): array {
+        $instance = new static();
+        $pdo = $instance->db;
+
+        // 1. Получаем все долги пользователя
+        $stmtDebts = $pdo->prepare("
+            SELECT d.*, c.name as category_name 
+            FROM debts d
+            LEFT JOIN categories c ON d.category_id = c.id
+            WHERE d.user_id = :uid
+            ORDER BY d.type ASC, d.name ASC
+        ");
+        $stmtDebts->execute(['uid' => $userId]);
+        $allDebts = $stmtDebts->fetchAll();
+
+        // 2. Получаем все транзакции по долгам (и план, и факт)
+        $stmtTx = $pdo->prepare("
+            SELECT t.debt_id, t.amount, t.status, t.transaction_date
+            FROM transactions t
+            WHERE t.user_id = :uid 
+              AND t.debt_id IS NOT NULL
+              AND t.type = 'expense'
+        ");
+        $stmtTx->execute(['uid' => $userId]);
+        $allTx = $stmtTx->fetchAll();
+
+        // Группируем транзакции по долгу и месяцу
+        $txByDebt = [];
+        foreach ($allTx as $tx) {
+            $month = date('Y-m', strtotime($tx['transaction_date']));
+            $txByDebt[$tx['debt_id']][$month][] = $tx;
+        }
+
+        // 3. Формируем список месяцев
+        $months = [];
+        $current = strtotime($startMonth . '-01');
+        $end = strtotime($endMonth . '-01');
+        while ($current <= $end) {
+            $months[] = date('Y-m', $current);
+            $current = strtotime('+1 month', $current);
+        }
+
+        // 4. Считаем остаток по каждому долгу на каждый месяц
+        $schedule = [];
+
+        foreach ($months as $month) {
+            $schedule[$month] = [];
+            
+            foreach ($allDebts as $debt) {
+                // Считаем, сколько выплачено (факт) до этого месяца
+                $paidBefore = 0;
+                foreach ($txByDebt[$debt['id']] ?? [] as $m => $txs) {
+                    if ($m <= $month) {
+                        foreach ($txs as $tx) {
+                            if ($tx['status'] === 'actual') {
+                                $paidBefore += (float)$tx['amount'];
+                            }
+                        }
+                    }
+                }
+
+                // Считаем, сколько запланировано до этого месяца (включая этот)
+                $plannedBefore = 0;
+                foreach ($txByDebt[$debt['id']] ?? [] as $m => $txs) {
+                    if ($m <= $month) {
+                        foreach ($txs as $tx) {
+                            if ($tx['status'] === 'planned') {
+                                $plannedBefore += (float)$tx['amount'];
+                            }
+                        }
+                    }
+                }
+
+                $remaining = (float)$debt['total_amount'] - $paidBefore - $plannedBefore;
+                $remaining = max(0, $remaining);
+
+                $schedule[$month][$debt['id']] = [
+                    'name' => $debt['name'],
+                    'type' => $debt['type'],
+                    'parent_id' => $debt['parent_id'],
+                    'total' => (float)$debt['total_amount'],
+                    'paid' => $paidBefore,
+                    'planned' => $plannedBefore,
+                    'remaining' => $remaining
+                ];
+            }
+        }
+
+        return [
+            'months' => $months,
+            'schedule' => $schedule
+        ];
+    }
 }
