@@ -72,7 +72,10 @@ class Transaction extends Model {
         $instance = new static();
         $pdo = $instance->db;
         
-        $pdo->beginTransaction();
+        if (!$pdo->inTransaction()) {
+            $pdo->beginTransaction();
+        }
+
         try {
             // Определяем статус распределения
             $debtPaymentStatus = $data['debt_payment_status'] ?? null;
@@ -123,7 +126,10 @@ class Transaction extends Model {
                 Debt::syncPaidAmount((int)$data['debt_id']);
             }
 
-            $pdo->commit();
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
+
             return $transactionId;
         } catch (\Exception $e) {
             $pdo->rollBack();
@@ -293,7 +299,7 @@ class Transaction extends Model {
     }
 
     // Работа с фильтрами
-    public static function getFiltered(int $userId, ?string $month = null, ?int $accountId = null, string $status = null): array {
+    public static function getFiltered(int $userId, ?string $month = null, ?int $accountId = null, ?string $status = null): array {
         $instance = new static();
         
         $sql = "

@@ -477,7 +477,10 @@ class Debt extends Model {
 
         if (!$debt) throw new \Exception('Долг не найден');
 
-        $pdo->beginTransaction();
+        if (!$pdo->inTransaction()) {
+            $pdo->beginTransaction();
+        }
+
         try {
             // ==========================================
             // КРЕДИТКА / КРЕДИТ
@@ -501,7 +504,7 @@ class Debt extends Model {
                         'counterparty' => 'Проценты по кредиту',
                         'transaction_date' => $tx['transaction_date'],
                         'has_details' => 0,
-                        'status' => $tx['status'],
+                        'status' => 'actual',
                         'debt_payment_status' => 'confirmed',
                         'items' => [[
                             'name' => 'Проценты',
@@ -582,7 +585,10 @@ class Debt extends Model {
                 self::syncPaidAmount($debtId);
             }
 
-            $pdo->commit();
+            if ($pdo->inTransaction()) {
+                $pdo->commit();
+            }
+
         } catch (\Exception $e) {
             $pdo->rollBack();
             throw $e;
